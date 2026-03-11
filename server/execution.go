@@ -52,7 +52,14 @@ type streamingPostUpdater struct {
 	interval      time.Duration
 	lastRendered  string
 	lastUpdateAt  time.Time
+	started       bool
+	finished      bool
 }
+
+const (
+	postStreamingControlStart = "start"
+	postStreamingControlEnd   = "end"
+)
 
 func (p *Plugin) executeBotAndPost(ctx context.Context, request BotRunRequest) (*BotRunResult, error) {
 	startedAt := time.Now()
@@ -590,7 +597,7 @@ func (p *Plugin) createStreamingPost(channel *model.Channel, rootID string, acco
 		UserId:    account.UserID,
 		ChannelId: channel.Id,
 		RootId:    rootID,
-		Message:   buildBotResponseMessage(account.Definition.DisplayName, "", correlationID, true),
+		Message:   buildBotStreamingMessage(account.Definition.DisplayName, ""),
 		Props: map[string]any{
 			"from_bot":               "true",
 			"langflow_bot_id":        account.Definition.ID,
@@ -610,6 +617,7 @@ func (u *streamingPostUpdater) update(content string, final bool) {
 	if u == nil || u.post == nil {
 		return
 	}
+	u.start()
 	if !final && u.interval > 0 && !u.lastUpdateAt.IsZero() && time.Since(u.lastUpdateAt) < u.interval {
 		return
 	}
@@ -631,14 +639,28 @@ func (u *streamingPostUpdater) render(content string, completed bool, failure ex
 	if u == nil || u.post == nil {
 		return nil, fmt.Errorf("streaming post is not initialized")
 	}
+	u.start()
 
+	previewMessage := buildBotStreamingMessage(u.account.Definition.DisplayName, content)
 	message := buildBotResponseMessage(u.account.Definition.DisplayName, content, u.correlationID, !failure.HasFailure && !completed)
 	if failure.HasFailure {
 		message = buildBotFailureMessage(u.account.Definition, u.correlationID, failure)
 	}
+	if !completed && !failure.HasFailure {
+		message = previewMessage
+	}
 	if message == u.lastRendered {
 		return u.post, nil
 	}
+
+	if !completed && !failure.HasFailure {
+		u.post.Message = message
+		u.sendUpdateEvent(message)
+		u.lastRendered = message
+		u.lastUpdateAt = time.Now()
+		return u.post, nil
+	}
+	defer u.finish()
 
 	updatedPost := *u.post
 	updatedPost.Message = message
@@ -664,10 +686,63 @@ func (u *streamingPostUpdater) render(content string, completed bool, failure ex
 		return nil, fmt.Errorf("failed to update Langflow streaming post: %w", appErr)
 	}
 
+	if failure.HasFailure {
+		u.sendUpdateEvent(message)
+	}
 	u.post = post
 	u.lastRendered = message
 	u.lastUpdateAt = time.Now()
 	return post, nil
+}
+
+func (u *streamingPostUpdater) start() {
+	if u == nil || u.post == nil || u.started {
+		return
+	}
+	u.started = true
+	u.publishControlEvent(postStreamingControlStart)
+}
+
+func (u *streamingPostUpdater) finish() {
+	if u == nil || u.post == nil || u.finished {
+		return
+	}
+	u.finished = true
+	u.publishControlEvent(postStreamingControlEnd)
+}
+
+func (u *streamingPostUpdater) sendUpdateEvent(message string) {
+	if u == nil || u.post == nil {
+		return
+	}
+	u.plugin.API.PublishWebSocketEvent("postupdate", map[string]any{
+		"post_id": u.post.Id,
+		"next":    message,
+	}, &model.WebsocketBroadcast{ChannelId: u.post.ChannelId})
+}
+
+func (u *streamingPostUpdater) publishControlEvent(control string) {
+	if u == nil || u.post == nil || strings.TrimSpace(control) == "" {
+		return
+	}
+	u.plugin.API.PublishWebSocketEvent("postupdate", map[string]any{
+		"post_id": u.post.Id,
+		"control": control,
+	}, &model.WebsocketBroadcast{ChannelId: u.post.ChannelId})
+}
+
+func buildBotStreamingMessage(displayName, output string) string {
+	body := strings.TrimSpace(output)
+	if body == "" {
+		body = "_Waiting for Langflow to stream a response..._"
+	}
+
+	parts := []string{
+		fmt.Sprintf("### %s", displayName),
+		"",
+		body,
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n"))
 }
 
 func buildBotResponseMessage(displayName, output, correlationID string, streaming bool) string {
