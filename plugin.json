@@ -1,0 +1,118 @@
+{
+    "id": "com.mattermost.langflow",
+    "name": "Langflow",
+    "version": "0.1.0-dev",
+    "description": "Run Langflow flows through dedicated Mattermost bots mapped one-to-one to Langflow flows.",
+    "homepage_url": "https://github.com/mattermost-community/mattermost-langflow-plugin",
+    "support_url": "https://github.com/mattermost-community/mattermost-langflow-plugin/issues",
+    "icon_path": "assets/starter-template-icon.svg",
+    "min_server_version": "10.0.0",
+    "server": {
+        "executables": {
+            "linux-amd64": "server/dist/plugin-linux-amd64",
+            "linux-arm64": "server/dist/plugin-linux-arm64",
+            "darwin-amd64": "server/dist/plugin-darwin-amd64",
+            "darwin-arm64": "server/dist/plugin-darwin-arm64",
+            "windows-amd64": "server/dist/plugin-windows-amd64.exe"
+        }
+    },
+    "webapp": {
+        "bundle_path": "webapp/dist/main.js"
+    },
+    "settings_schema": {
+        "header": "Configure the Langflow endpoint, safety limits, and the bot catalog that maps one Mattermost bot to one Langflow flow.",
+        "footer": "",
+        "settings": [
+            {
+                "key": "LangflowBaseURL",
+                "display_name": "Langflow Base URL",
+                "type": "text",
+                "help_text": "Base URL for the Langflow server, for example https://langflow.example.com.",
+                "placeholder": "https://langflow.example.com"
+            },
+            {
+                "key": "LangflowAuthMode",
+                "display_name": "Auth Header Mode",
+                "type": "dropdown",
+                "help_text": "Choose whether the token is sent as a Bearer token or as x-api-key.",
+                "options": [
+                    {
+                        "display_name": "Bearer Token",
+                        "value": "bearer"
+                    },
+                    {
+                        "display_name": "x-api-key",
+                        "value": "x-api-key"
+                    }
+                ],
+                "default": "bearer"
+            },
+            {
+                "key": "LangflowAuthToken",
+                "display_name": "Langflow API Token",
+                "type": "text",
+                "help_text": "Secret used to authenticate with Langflow.",
+                "secret": true
+            },
+            {
+                "key": "AllowHosts",
+                "display_name": "Allowed Hosts",
+                "type": "text",
+                "help_text": "Comma-separated hostnames allowed for outbound Langflow calls. Leave empty to default to the Langflow host only.",
+                "placeholder": "langflow.example.com, *.internal.example.com"
+            },
+            {
+                "key": "BotDefinitions",
+                "display_name": "Langflow Bots",
+                "type": "custom"
+            },
+            {
+                "key": "DefaultTimeoutSeconds",
+                "display_name": "Default Timeout (seconds)",
+                "type": "text",
+                "help_text": "Timeout applied to Langflow requests.",
+                "default": "30"
+            },
+            {
+                "key": "MaxInputLength",
+                "display_name": "Max Input Length",
+                "type": "text",
+                "help_text": "Maximum characters accepted from a user prompt before the request is rejected.",
+                "default": "4000"
+            },
+            {
+                "key": "MaxOutputLength",
+                "display_name": "Max Output Length",
+                "type": "text",
+                "help_text": "Maximum characters written back to Mattermost after truncation.",
+                "default": "8000"
+            },
+            {
+                "key": "ContextPostLimit",
+                "display_name": "Context Post Limit",
+                "type": "text",
+                "help_text": "Maximum number of recent thread or channel posts attached as context.",
+                "default": "8"
+            },
+            {
+                "key": "EnableDebugLogs",
+                "display_name": "Enable Debug Logs",
+                "type": "bool",
+                "help_text": "Emit correlation ids, payload summaries, and config diagnostics to the plugin log.",
+                "default": false
+            },
+            {
+                "key": "EnableUsageLogs",
+                "display_name": "Enable Usage Logs",
+                "type": "bool",
+                "help_text": "Record who executed which bot and Langflow flow, and whether it succeeded.",
+                "default": true
+            },
+            {
+                "key": "StatusPanel",
+                "display_name": "Connection Status",
+                "type": "custom"
+            }
+        ]
+    }
+}
