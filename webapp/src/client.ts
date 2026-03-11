@@ -74,6 +74,7 @@ export type ManagedBotStatus = {
     user_id?: string;
     registered: boolean;
     active: boolean;
+    status_message?: string;
 };
 
 export type BotSyncState = {

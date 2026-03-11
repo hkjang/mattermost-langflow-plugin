@@ -58,17 +58,17 @@ export default function StatusPanel() {
 
     return (
         <div style={cardStyle}>
-            <strong>{'Langflow Status'}</strong>
-            {loading && <span>{'Loading plugin status...'}</span>}
+            <strong>{'Langflow 상태'}</strong>
+            {loading && <span>{'플러그인 상태를 불러오는 중입니다...'}</span>}
             {!loading && status && (
                 <>
-                    <div>{`Base URL: ${status.base_url || 'Not configured'}`}</div>
-                    <div>{`Configured bots: ${status.bot_count}`}</div>
-                    <div>{`Allowed hosts: ${(status.allow_hosts || []).join(', ') || 'Uses Langflow host'}`}</div>
-                    <div>{`Streaming replies: ${status.streaming_enabled ? 'enabled' : 'disabled'}`}</div>
-                    <div>{`Streaming update interval: ${status.streaming_update_interval_ms || 0} ms`}</div>
-                    {status.config_error && <div>{`Config error: ${status.config_error}`}</div>}
-                    {status.bot_sync?.last_error && <div>{`Bot sync error: ${status.bot_sync.last_error}`}</div>}
+                    <div>{`기본 URL: ${status.base_url || '설정되지 않음'}`}</div>
+                    <div>{`설정된 봇 수: ${status.bot_count}`}</div>
+                    <div>{`허용 호스트: ${(status.allow_hosts || []).join(', ') || 'Langflow 호스트를 기본 사용'}`}</div>
+                    <div>{`스트리밍 응답: ${status.streaming_enabled ? '사용' : '사용 안 함'}`}</div>
+                    <div>{`스트리밍 갱신 주기: ${status.streaming_update_interval_ms || 0}ms`}</div>
+                    {status.config_error && <div>{`설정 오류: ${status.config_error}`}</div>}
+                    {status.bot_sync?.last_error && <div>{`봇 동기화 오류: ${status.bot_sync.last_error}`}</div>}
                     {(status.bots || []).length > 0 && (
                         <div style={{display: 'flex', flexDirection: 'column', gap: '10px'}}>
                             {(status.bots || []).map((bot) => {
@@ -88,8 +88,9 @@ export default function StatusPanel() {
                                     >
                                         <strong>{bot.display_name || bot.username}</strong>
                                         <span>{`@${bot.username} -> ${bot.flow_id}`}</span>
-                                        {managed && <span>{`Mattermost user: ${managed.user_id || 'Pending creation'}`}</span>}
-                                        {managed && <span>{`Managed: ${managed.registered ? 'yes' : 'no'}, active: ${managed.active ? 'yes' : 'no'}`}</span>}
+                                        {managed && <span>{`Mattermost 사용자: ${managed.user_id || '생성 대기 중'}`}</span>}
+                                        {managed && <span>{`플러그인 관리: ${managed.registered ? '예' : '아니오'}, 활성 상태: ${managed.active ? '예' : '아니오'}`}</span>}
+                                        {managed?.status_message && <span>{`상태: ${managed.status_message}`}</span>}
                                         {bot.description && <span>{bot.description}</span>}
                                     </div>
                                 );
@@ -102,11 +103,11 @@ export default function StatusPanel() {
                         onClick={onTestConnection}
                         type='button'
                     >
-                        {testing ? 'Testing...' : 'Test connection'}
+                        {testing ? '연결 확인 중...' : '연결 테스트'}
                     </button>
                     {connection && (
                         <div>
-                            <div>{connection.ok ? 'Connection succeeded' : 'Connection failed'}</div>
+                            <div>{connection.ok ? '연결에 성공했습니다.' : '연결에 실패했습니다.'}</div>
                             <div>{connection.url}</div>
                             <div>{connection.message}</div>
                         </div>
@@ -115,13 +116,13 @@ export default function StatusPanel() {
             )}
             {message && <span>{message}</span>}
             <div style={{fontSize: '12px', opacity: 0.8}}>
-                {'Saving System Console settings creates or updates the Mattermost bot accounts owned by this plugin. Removing a bot from the catalog deactivates that plugin-managed bot.'}
+                {'System Console에서 저장하면 이 플러그인이 관리하는 Mattermost 봇 계정이 생성되거나 갱신됩니다. 목록에서 제거한 봇은 비활성화됩니다.'}
             </div>
             <div style={{fontSize: '12px', opacity: 0.8}}>
-                {'Users can then DM the bot or @mention it in Mattermost, and the plugin will call the mapped Langflow run API for that bot.'}
+                {'이후 사용자는 해당 봇과 DM을 하거나 채널에서 @멘션할 수 있고, 플러그인은 그 봇에 매핑된 Langflow run API를 호출합니다.'}
             </div>
             <div style={{fontSize: '12px', opacity: 0.8}}>
-                {'When streaming is enabled, the plugin posts one bot reply first and then updates that same post as Langflow tokens arrive.'}
+                {'스트리밍이 켜져 있으면 봇 답글을 먼저 하나 생성한 뒤, Langflow 토큰이 도착할 때마다 같은 포스트를 갱신합니다.'}
             </div>
         </div>
     );

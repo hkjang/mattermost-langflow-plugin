@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 	"time"
@@ -293,103 +294,95 @@ func (p *Plugin) ensureBots() error {
 	}
 	if len(cfg.BotDefinitions) == 0 {
 		p.setBotAccounts(map[string]botAccount{})
-		if err := p.deactivateManagedBots(nil); err != nil {
-			p.setBotSyncState(botSyncState{
-				LastError: err.Error(),
-				UpdatedAt: time.Now().UnixMilli(),
-				Entries:   []botSyncEntry{},
-			})
-			return err
+		deactivateErr := p.deactivateManagedBots(nil)
+		lastError := ""
+		if deactivateErr != nil {
+			lastError = deactivateErr.Error()
 		}
 		p.setBotSyncState(botSyncState{
+			LastError: lastError,
 			UpdatedAt: time.Now().UnixMilli(),
 			Entries:   []botSyncEntry{},
 		})
 		return nil
 	}
 
-	bots, err := p.client.Bot.List(0, 200, pluginapi.BotOwner(manifest.Id), pluginapi.BotIncludeDeleted())
-	if err != nil {
-		p.setBotSyncState(botSyncState{
-			LastError: err.Error(),
-			UpdatedAt: time.Now().UnixMilli(),
-			Entries:   []botSyncEntry{},
-		})
-		return fmt.Errorf("failed to list plugin bots: %w", err)
-	}
-
-	existingByUsername := map[string]*model.Bot{}
-	for _, bot := range bots {
-		if bot == nil {
-			continue
-		}
-		existingByUsername[strings.ToLower(bot.Username)] = bot
-	}
-
 	accounts := make(map[string]botAccount, len(cfg.BotDefinitions))
 	syncEntries := make([]botSyncEntry, 0, len(cfg.BotDefinitions))
 	configuredUsernames := make(map[string]struct{}, len(cfg.BotDefinitions))
+	syncIssues := make([]string, 0)
 	for _, definition := range cfg.BotDefinitions {
 		configuredUsernames[definition.Username] = struct{}{}
-		userID, err := p.ensureSingleBot(existingByUsername, definition)
-		if err != nil {
-			p.setBotSyncState(botSyncState{
-				LastError: err.Error(),
-				UpdatedAt: time.Now().UnixMilli(),
-				Entries:   syncEntries,
-			})
-			return err
+		userID, statusMessage, ensureErr := p.ensureSingleBot(definition)
+		entry := botSyncEntry{
+			BotID:         definition.ID,
+			Username:      definition.Username,
+			DisplayName:   definition.DisplayName,
+			FlowID:        definition.FlowID,
+			UserID:        userID,
+			Registered:    ensureErr == nil && userID != "",
+			Active:        ensureErr == nil && userID != "",
+			StatusMessage: statusMessage,
+		}
+		if ensureErr != nil {
+			entry.StatusMessage = ensureErr.Error()
+			entry.Active = false
+			syncEntries = append(syncEntries, entry)
+			syncIssues = append(syncIssues, ensureErr.Error())
+			continue
 		}
 		accounts[definition.ID] = botAccount{
 			Definition: definition,
 			UserID:     userID,
 		}
-		syncEntries = append(syncEntries, botSyncEntry{
-			BotID:       definition.ID,
-			Username:    definition.Username,
-			DisplayName: definition.DisplayName,
-			FlowID:      definition.FlowID,
-			UserID:      userID,
-			Registered:  true,
-			Active:      true,
-		})
+		syncEntries = append(syncEntries, entry)
 	}
 
-	if err := p.deactivateManagedBots(configuredUsernames); err != nil {
-		p.setBotSyncState(botSyncState{
-			LastError: err.Error(),
-			UpdatedAt: time.Now().UnixMilli(),
-			Entries:   syncEntries,
-		})
-		return err
+	if deactivateErr := p.deactivateManagedBots(configuredUsernames); deactivateErr != nil {
+		syncIssues = append(syncIssues, deactivateErr.Error())
 	}
 
 	p.setBotAccounts(accounts)
 	p.setBotSyncState(botSyncState{
+		LastError: joinSyncIssues(syncIssues),
 		UpdatedAt: time.Now().UnixMilli(),
 		Entries:   syncEntries,
 	})
 	return nil
 }
 
-func (p *Plugin) ensureSingleBot(existingByUsername map[string]*model.Bot, definition BotDefinition) (string, error) {
-	existing := existingByUsername[definition.Username]
+func (p *Plugin) ensureSingleBot(definition BotDefinition) (string, string, error) {
 	description := botDescription(definition)
+	displayName := definition.DisplayName
 
-	if existing != nil {
-		displayName := definition.DisplayName
-		_, err := p.client.Bot.Patch(existing.UserId, &model.BotPatch{
-			DisplayName: &displayName,
-			Description: &description,
-		})
-		if err != nil {
-			return "", fmt.Errorf("failed to update Langflow bot %q: %w", definition.Username, err)
+	existingUser, appErr := p.API.GetUserByUsername(definition.Username)
+	if appErr == nil && existingUser != nil {
+		if !existingUser.IsBot {
+			return "", "", fmt.Errorf("username @%s is already used by a regular Mattermost account", definition.Username)
 		}
-		if _, err := p.client.Bot.UpdateActive(existing.UserId, true); err != nil {
-			return "", fmt.Errorf("failed to activate Langflow bot %q: %w", definition.Username, err)
+
+		statusMessage := ""
+		if _, err := p.client.Bot.Get(existingUser.Id, true); err == nil {
+			if _, err := p.client.Bot.Patch(existingUser.Id, &model.BotPatch{
+				DisplayName: &displayName,
+				Description: &description,
+			}); err != nil && !isBotNotFoundError(err) {
+				return "", "", fmt.Errorf("failed to update Langflow bot @%s: %w", definition.Username, err)
+			}
+			if _, err := p.client.Bot.UpdateActive(existingUser.Id, true); err != nil && !isBotNotFoundError(err) {
+				return "", "", fmt.Errorf("failed to activate Langflow bot @%s: %w", definition.Username, err)
+			}
+			p.API.LogInfo("Ensured Langflow bot", "bot_username", definition.Username, "flow_id", definition.FlowID, "action", "linked_existing")
+			return existingUser.Id, statusMessage, nil
+		} else {
+			statusMessage = fmt.Sprintf("기존 봇 사용자 계정을 연결했습니다. Bot 메타데이터 조회는 실패했지만 메시지 전송은 계속 시도합니다: %s", err.Error())
+			p.API.LogWarn("Linked Langflow bot user without bot metadata", "bot_username", definition.Username, "user_id", existingUser.Id, "error", err.Error())
+			return existingUser.Id, statusMessage, nil
 		}
-		p.API.LogInfo("Ensured Langflow bot", "bot_username", definition.Username, "flow_id", definition.FlowID, "action", "updated")
-		return existing.UserId, nil
+	}
+
+	if appErr != nil && appErr.StatusCode != http.StatusNotFound {
+		return "", "", fmt.Errorf("failed to look up Mattermost user @%s: %w", definition.Username, appErr)
 	}
 
 	newBot := &model.Bot{
@@ -398,19 +391,25 @@ func (p *Plugin) ensureSingleBot(existingByUsername map[string]*model.Bot, defin
 		Description: description,
 	}
 	if err := p.client.Bot.Create(newBot); err != nil {
-		return "", fmt.Errorf("failed to create Langflow bot %q: %w", definition.Username, err)
+		existingUser, existingErr := p.API.GetUserByUsername(definition.Username)
+		if existingErr == nil && existingUser != nil && existingUser.IsBot {
+			p.API.LogWarn("Recovered Langflow bot by linking an already existing bot user", "bot_username", definition.Username, "user_id", existingUser.Id, "error", err.Error())
+			return existingUser.Id, "이미 존재하는 봇 사용자 계정에 연결했습니다.", nil
+		}
+		return "", "", fmt.Errorf("failed to create Langflow bot @%s: %w", definition.Username, err)
 	}
 
 	p.API.LogInfo("Ensured Langflow bot", "bot_username", definition.Username, "flow_id", definition.FlowID, "action", "created")
-	return newBot.UserId, nil
+	return newBot.UserId, "", nil
 }
 
 func (p *Plugin) deactivateManagedBots(configuredUsernames map[string]struct{}) error {
-	bots, err := p.client.Bot.List(0, 200, pluginapi.BotOwner(manifest.Id), pluginapi.BotIncludeDeleted())
+	bots, err := p.client.Bot.List(0, 200, pluginapi.BotOwner(manifest.Id))
 	if err != nil {
 		return fmt.Errorf("failed to list plugin bots for deactivation: %w", err)
 	}
 
+	issues := make([]string, 0)
 	for _, bot := range bots {
 		if bot == nil {
 			continue
@@ -419,11 +418,19 @@ func (p *Plugin) deactivateManagedBots(configuredUsernames map[string]struct{}) 
 			continue
 		}
 		if _, err := p.client.Bot.UpdateActive(bot.UserId, false); err != nil {
-			return fmt.Errorf("failed to deactivate removed Langflow bot %q: %w", bot.Username, err)
+			if isBotNotFoundError(err) {
+				p.API.LogWarn("Skipped deactivation for missing Langflow bot metadata", "bot_username", bot.Username, "user_id", bot.UserId, "error", err.Error())
+				continue
+			}
+			issues = append(issues, fmt.Sprintf("failed to deactivate removed Langflow bot @%s: %s", bot.Username, err.Error()))
+			continue
 		}
 		p.API.LogInfo("Deactivated removed Langflow bot", "bot_username", bot.Username, "user_id", bot.UserId)
 	}
 
+	if len(issues) > 0 {
+		return fmt.Errorf("%s", strings.Join(issues, "; "))
+	}
 	return nil
 }
 
@@ -701,4 +708,26 @@ func clonePostProps(source model.StringInterface) model.StringInterface {
 		props[key] = value
 	}
 	return props
+}
+
+func isBotNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "resource bot not found") ||
+		strings.Contains(lower, "bot does not exist") ||
+		strings.Contains(lower, "unable to get bot")
+}
+
+func joinSyncIssues(issues []string) string {
+	filtered := make([]string, 0, len(issues))
+	for _, issue := range issues {
+		issue = strings.TrimSpace(issue)
+		if issue == "" {
+			continue
+		}
+		filtered = append(filtered, issue)
+	}
+	return strings.Join(filtered, " | ")
 }

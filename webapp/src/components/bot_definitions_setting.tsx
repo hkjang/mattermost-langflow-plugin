@@ -132,8 +132,8 @@ const sampleBots: StoredBotDefinition[] = [
     {
         id: 'thread-summary-bot',
         username: 'thread-summary-bot',
-        display_name: 'Thread Summary Bot',
-        description: 'Summarizes the current thread with action items.',
+        display_name: '스레드 요약 봇',
+        description: '현재 스레드를 요약하고 액션 아이템을 정리합니다.',
         flow_id: 'thread-summary',
         include_context_by_default: true,
         allowed_teams: ['engineering'],
@@ -142,18 +142,18 @@ const sampleBots: StoredBotDefinition[] = [
         input_schema: [
             {
                 name: 'tone',
-                label: 'Tone',
+                label: '톤',
                 type: 'text',
-                placeholder: 'concise',
-                default_value: 'concise',
+                placeholder: '간결하게',
+                default_value: '간결하게',
             },
         ],
     },
     {
         id: 'support-assistant-bot',
         username: 'support-assistant-bot',
-        display_name: 'Support Assistant',
-        description: 'Answers customer support questions with the mapped Langflow flow.',
+        display_name: '지원 도우미',
+        description: '매핑된 Langflow flow로 고객 지원 질문에 답변합니다.',
         flow_id: 'support-assistant',
         include_context_by_default: true,
         allowed_teams: [],
@@ -250,30 +250,30 @@ export default function BotDefinitionsSetting(props: CustomSettingProps) {
     return (
         <div style={containerStyle}>
             <section style={cardStyle}>
-                <strong>{'Langflow Bot Catalog'}</strong>
+                <strong>{'Langflow 봇 카탈로그'}</strong>
                 <span style={{fontSize: '12px', opacity: 0.8}}>
-                    {'Register multiple Mattermost bots here. Each bot is permanently bound to one Langflow flow and can be invoked by DM or @mention.'}
+                    {'여기에서 여러 Mattermost 봇을 등록할 수 있습니다. 각 봇은 하나의 Langflow flow에 고정 연결되며 DM 또는 @멘션으로 호출됩니다.'}
                 </span>
                 <span style={{fontSize: '12px', opacity: 0.8}}>
-                    {'When a bot runs, the plugin calls POST /api/v1/run/$FLOW_ID?stream=true and sends a JSON body with input_value built from the prompt, optional form fields, optional conversation context, and a Mattermost-derived session id.'}
+                    {'봇이 실행되면 플러그인은 POST /api/v1/run/$FLOW_ID?stream=true를 호출하고, 프롬프트와 추가 입력값, 대화 컨텍스트, Mattermost 기반 session id를 포함한 JSON body를 전송합니다.'}
                 </span>
                 <span style={{fontSize: '12px', opacity: 0.8}}>
-                    {'After you click Save in the System Console, the plugin creates or updates the matching Mattermost bot accounts automatically.'}
+                    {'System Console에서 저장하면 해당 Mattermost 봇 계정이 자동으로 생성되거나 갱신됩니다.'}
                 </span>
                 {props.helpText}
                 {props.setByEnv && (
                     <span style={{color: 'var(--error-text)', fontSize: '12px'}}>
-                        {'This setting is managed by environment configuration and cannot be edited here.'}
+                        {'이 설정은 환경 변수로 관리되고 있어 여기에서 수정할 수 없습니다.'}
                     </span>
                 )}
                 {loadError && (
                     <span style={{color: 'var(--error-text)', fontSize: '12px'}}>
-                        {`Failed to parse saved bot catalog. ${loadError}`}
+                        {`저장된 봇 카탈로그를 해석하지 못했습니다. ${loadError}`}
                     </span>
                 )}
                 {validationMessages.length > 0 && (
                     <div style={{background: 'rgba(var(--error-text-color-rgb), 0.08)', borderRadius: '8px', padding: '12px'}}>
-                        <strong>{'Validation'}</strong>
+                        <strong>{'검증 결과'}</strong>
                         <div style={{display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '8px'}}>
                             {validationMessages.map((message) => (
                                 <span
@@ -291,21 +291,21 @@ export default function BotDefinitionsSetting(props: CustomSettingProps) {
             <div style={layoutStyle}>
                 <section style={cardStyle}>
                     <div style={{display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center'}}>
-                        <strong>{'Bots'}</strong>
+                        <strong>{'봇 목록'}</strong>
                         <button
                             className='btn btn-primary'
                             disabled={disabled}
                             onClick={addBot}
                             type='button'
                         >
-                            {'Add bot'}
+                            {'봇 추가'}
                         </button>
                     </div>
 
                     {bots.length === 0 && (
                         <div style={{display: 'flex', flexDirection: 'column', gap: '12px'}}>
                             <span style={{fontSize: '12px', opacity: 0.8}}>
-                                {'No bots configured yet. Add your first bot or load the sample catalog.'}
+                                {'아직 설정된 봇이 없습니다. 첫 번째 봇을 추가하거나 예시 카탈로그를 불러오세요.'}
                             </span>
                             <button
                                 className='btn btn-secondary'
@@ -313,7 +313,7 @@ export default function BotDefinitionsSetting(props: CustomSettingProps) {
                                 onClick={loadSampleBots}
                                 type='button'
                             >
-                                {'Load sample bots'}
+                                {'예시 봇 불러오기'}
                             </button>
                         </div>
                     )}
@@ -329,9 +329,9 @@ export default function BotDefinitionsSetting(props: CustomSettingProps) {
                                         style={botListItemStyle(bot.local_id === selectedBot?.local_id)}
                                         type='button'
                                     >
-                                        <strong>{bot.display_name || bot.username || 'New bot'}</strong>
+                                        <strong>{bot.display_name || bot.username || '새 봇'}</strong>
                                         <span style={{fontSize: '12px', opacity: 0.8}}>{`@${bot.username || 'username'}`}</span>
-                                        <span style={{fontSize: '12px', opacity: 0.8}}>{bot.flow_id || 'No flow linked yet'}</span>
+                                        <span style={{fontSize: '12px', opacity: 0.8}}>{bot.flow_id || '연결된 flow가 없습니다'}</span>
                                     </button>
                                 ))}
                             </div>
@@ -342,7 +342,7 @@ export default function BotDefinitionsSetting(props: CustomSettingProps) {
                                     onClick={duplicateBot}
                                     type='button'
                                 >
-                                    {'Duplicate'}
+                                    {'복제'}
                                 </button>
                                 <button
                                     className='btn btn-secondary'
@@ -350,7 +350,7 @@ export default function BotDefinitionsSetting(props: CustomSettingProps) {
                                     onClick={removeSelectedBot}
                                     type='button'
                                 >
-                                    {'Remove'}
+                                    {'삭제'}
                                 </button>
                             </div>
                         </>
@@ -360,19 +360,19 @@ export default function BotDefinitionsSetting(props: CustomSettingProps) {
                 <section style={cardStyle}>
                     {!selectedBot && (
                         <span style={{fontSize: '12px', opacity: 0.8}}>
-                            {'Select a bot to edit its flow binding, access policy, and input form.'}
+                            {'봇을 선택하면 flow 연결, 접근 정책, 입력 폼을 수정할 수 있습니다.'}
                         </span>
                     )}
 
                     {selectedBot && (
                         <>
                             <div style={{display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center'}}>
-                                <strong>{selectedBot.display_name || selectedBot.username || 'Bot details'}</strong>
-                                <span style={{fontSize: '12px', opacity: 0.8}}>{`Calls flow ${selectedBot.flow_id || '$FLOW_ID'}`}</span>
+                                <strong>{selectedBot.display_name || selectedBot.username || '봇 상세 설정'}</strong>
+                                <span style={{fontSize: '12px', opacity: 0.8}}>{`연결 flow: ${selectedBot.flow_id || '$FLOW_ID'}`}</span>
                             </div>
 
                             <div style={gridTwoStyle}>
-                                <LabeledField label={'Bot ID'}>
+                                <LabeledField label={'봇 ID'}>
                                     <input
                                         disabled={disabled}
                                         onChange={(event) => updateBot(selectedBot.local_id, (bot) => ({...bot, id: event.target.value}))}
@@ -392,7 +392,7 @@ export default function BotDefinitionsSetting(props: CustomSettingProps) {
                             </div>
 
                             <div style={gridTwoStyle}>
-                                <LabeledField label={'Bot username'}>
+                                <LabeledField label={'봇 사용자 이름'}>
                                     <input
                                         disabled={disabled}
                                         onChange={(event) => updateBot(selectedBot.local_id, (bot) => ({...bot, username: sanitizeUsername(event.target.value)}))}
@@ -401,22 +401,22 @@ export default function BotDefinitionsSetting(props: CustomSettingProps) {
                                         value={selectedBot.username}
                                     />
                                 </LabeledField>
-                                <LabeledField label={'Display name'}>
+                                <LabeledField label={'표시 이름'}>
                                     <input
                                         disabled={disabled}
                                         onChange={(event) => updateBot(selectedBot.local_id, (bot) => ({...bot, display_name: event.target.value}))}
-                                        placeholder={'Thread Summary Bot'}
+                                        placeholder={'스레드 요약 봇'}
                                         style={fieldStyle}
                                         value={selectedBot.display_name}
                                     />
                                 </LabeledField>
                             </div>
 
-                            <LabeledField label={'Description'}>
+                            <LabeledField label={'설명'}>
                                 <textarea
                                     disabled={disabled}
                                     onChange={(event) => updateBot(selectedBot.local_id, (bot) => ({...bot, description: event.target.value}))}
-                                    placeholder={'Explain what this bot does in Mattermost.'}
+                                    placeholder={'이 봇이 Mattermost에서 무엇을 하는지 설명하세요.'}
                                     style={textAreaStyle}
                                     value={selectedBot.description}
                                 />
@@ -429,11 +429,11 @@ export default function BotDefinitionsSetting(props: CustomSettingProps) {
                                     onChange={(event) => updateBot(selectedBot.local_id, (bot) => ({...bot, include_context_by_default: event.target.checked}))}
                                     type='checkbox'
                                 />
-                                {'Include recent Mattermost context by default'}
+                                {'최근 Mattermost 대화를 기본 컨텍스트로 포함'}
                             </label>
 
                             <div style={gridTwoStyle}>
-                                <LabeledField label={'Allowed teams'}>
+                                <LabeledField label={'허용 팀'}>
                                     <input
                                         disabled={disabled}
                                         onChange={(event) => updateBot(selectedBot.local_id, (bot) => ({...bot, allowed_teams: splitCSV(event.target.value)}))}
@@ -442,7 +442,7 @@ export default function BotDefinitionsSetting(props: CustomSettingProps) {
                                         value={joinCSV(selectedBot.allowed_teams)}
                                     />
                                 </LabeledField>
-                                <LabeledField label={'Allowed channels'}>
+                                <LabeledField label={'허용 채널'}>
                                     <input
                                         disabled={disabled}
                                         onChange={(event) => updateBot(selectedBot.local_id, (bot) => ({...bot, allowed_channels: splitCSV(event.target.value)}))}
@@ -453,7 +453,7 @@ export default function BotDefinitionsSetting(props: CustomSettingProps) {
                                 </LabeledField>
                             </div>
 
-                            <LabeledField label={'Allowed users'}>
+                            <LabeledField label={'허용 사용자'}>
                                 <input
                                     disabled={disabled}
                                     onChange={(event) => updateBot(selectedBot.local_id, (bot) => ({...bot, allowed_users: splitCSV(event.target.value)}))}
@@ -465,20 +465,20 @@ export default function BotDefinitionsSetting(props: CustomSettingProps) {
 
                             <section style={{...cardStyle, padding: '12px'}}>
                                 <div style={{display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center'}}>
-                                    <strong>{'Input form fields'}</strong>
+                                    <strong>{'추가 입력 필드'}</strong>
                                     <button
                                         className='btn btn-secondary'
                                         disabled={disabled}
                                         onClick={() => updateBot(selectedBot.local_id, (bot) => ({...bot, input_schema: [...bot.input_schema, createEmptyInputField()]}))}
                                         type='button'
                                     >
-                                        {'Add field'}
+                                        {'필드 추가'}
                                     </button>
                                 </div>
 
                                 {selectedBot.input_schema.length === 0 && (
                                     <span style={{fontSize: '12px', opacity: 0.8}}>
-                                        {'No extra inputs. The bot will only send the main prompt to Langflow.'}
+                                        {'추가 입력 필드가 없습니다. 이 경우 메인 프롬프트만 Langflow로 전송됩니다.'}
                                     </span>
                                 )}
 
@@ -488,7 +488,7 @@ export default function BotDefinitionsSetting(props: CustomSettingProps) {
                                         style={{border: '1px solid rgba(var(--center-channel-color-rgb), 0.1)', borderRadius: '10px', padding: '12px'}}
                                     >
                                         <div style={{display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center'}}>
-                                            <strong>{field.label || field.name || `Field ${index + 1}`}</strong>
+                                            <strong>{field.label || field.name || `필드 ${index + 1}`}</strong>
                                             <button
                                                 className='btn btn-secondary'
                                                 disabled={disabled}
@@ -498,12 +498,12 @@ export default function BotDefinitionsSetting(props: CustomSettingProps) {
                                                 }))}
                                                 type='button'
                                             >
-                                                {'Remove'}
+                                                {'삭제'}
                                             </button>
                                         </div>
 
                                         <div style={{...gridTwoStyle, marginTop: '12px'}}>
-                                            <LabeledField label={'Field name'}>
+                                            <LabeledField label={'필드 이름'}>
                                                 <input
                                                     disabled={disabled}
                                                     onChange={(event) => updateInputField(selectedBot.local_id, field.id, {name: event.target.value}, updateBot)}
@@ -512,11 +512,11 @@ export default function BotDefinitionsSetting(props: CustomSettingProps) {
                                                     value={field.name}
                                                 />
                                             </LabeledField>
-                                            <LabeledField label={'Label'}>
+                                            <LabeledField label={'표시 라벨'}>
                                                 <input
                                                     disabled={disabled}
                                                     onChange={(event) => updateInputField(selectedBot.local_id, field.id, {label: event.target.value}, updateBot)}
-                                                    placeholder={'Tone'}
+                                                    placeholder={'톤'}
                                                     style={fieldStyle}
                                                     value={field.label}
                                                 />
@@ -524,46 +524,46 @@ export default function BotDefinitionsSetting(props: CustomSettingProps) {
                                         </div>
 
                                         <div style={{...gridTwoStyle, marginTop: '12px'}}>
-                                            <LabeledField label={'Type'}>
+                                            <LabeledField label={'타입'}>
                                                 <select
                                                     disabled={disabled}
                                                     onChange={(event) => updateInputField(selectedBot.local_id, field.id, {type: event.target.value as InputFieldType, default_value: defaultValueForType(event.target.value as InputFieldType)}, updateBot)}
                                                     style={fieldStyle}
                                                     value={field.type}
                                                 >
-                                                    <option value='text'>{'Text'}</option>
-                                                    <option value='textarea'>{'Textarea'}</option>
-                                                    <option value='number'>{'Number'}</option>
-                                                    <option value='bool'>{'Boolean'}</option>
+                                                    <option value='text'>{'텍스트'}</option>
+                                                    <option value='textarea'>{'여러 줄 텍스트'}</option>
+                                                    <option value='number'>{'숫자'}</option>
+                                                    <option value='bool'>{'불리언'}</option>
                                                 </select>
                                             </LabeledField>
-                                            <LabeledField label={'Placeholder'}>
+                                            <LabeledField label={'플레이스홀더'}>
                                                 <input
                                                     disabled={disabled}
                                                     onChange={(event) => updateInputField(selectedBot.local_id, field.id, {placeholder: event.target.value}, updateBot)}
-                                                    placeholder={'concise'}
+                                                    placeholder={'간결하게'}
                                                     style={fieldStyle}
                                                     value={field.placeholder}
                                                 />
                                             </LabeledField>
                                         </div>
 
-                                        <LabeledField label={'Description'}>
+                                        <LabeledField label={'설명'}>
                                             <input
                                                 disabled={disabled}
                                                 onChange={(event) => updateInputField(selectedBot.local_id, field.id, {description: event.target.value}, updateBot)}
-                                                placeholder={'Optional guidance shown to users.'}
+                                                placeholder={'사용자에게 보여 줄 안내 문구입니다.'}
                                                 style={fieldStyle}
                                                 value={field.description}
                                             />
                                         </LabeledField>
 
                                         <div style={{...gridTwoStyle, marginTop: '12px'}}>
-                                            <LabeledField label={'Default value'}>
+                                            <LabeledField label={'기본값'}>
                                                 {renderDefaultValueEditor(field, disabled, (value) => updateInputField(selectedBot.local_id, field.id, {default_value: value}, updateBot))}
                                             </LabeledField>
                                             <div style={columnStyle}>
-                                                <span style={{fontWeight: 600}}>{'Required'}</span>
+                                                <span style={{fontWeight: 600}}>{'필수 여부'}</span>
                                                 <label style={{display: 'flex', gap: '8px', alignItems: 'center'}}>
                                                     <input
                                                         checked={field.required}
@@ -571,7 +571,7 @@ export default function BotDefinitionsSetting(props: CustomSettingProps) {
                                                         onChange={(event) => updateInputField(selectedBot.local_id, field.id, {required: event.target.checked}, updateBot)}
                                                         type='checkbox'
                                                     />
-                                                    {'Users must fill this field before running the bot'}
+                                                    {'실행 전에 사용자가 반드시 입력해야 합니다'}
                                                 </label>
                                             </div>
                                         </div>
@@ -580,12 +580,12 @@ export default function BotDefinitionsSetting(props: CustomSettingProps) {
                             </section>
 
                             <section style={{...cardStyle, padding: '12px'}}>
-                                <strong>{'Invocation preview'}</strong>
+                                <strong>{'호출 미리보기'}</strong>
                                 <div style={codeStyle}>
                                     {buildCurlPreview(selectedBot)}
                                 </div>
                                 <span style={{fontSize: '12px', opacity: 0.8}}>
-                                    {selectedBot.username ? `Users invoke this bot with @${selectedBot.username} in channels, threads, or DM.` : 'Set a bot username to enable mention and DM routing.'}
+                                    {selectedBot.username ? `사용자는 채널, 스레드, DM에서 @${selectedBot.username} 형태로 이 봇을 호출할 수 있습니다.` : '멘션 및 DM 라우팅을 사용하려면 봇 username을 설정하세요.'}
                                 </span>
                             </section>
                         </>
@@ -594,7 +594,7 @@ export default function BotDefinitionsSetting(props: CustomSettingProps) {
             </div>
 
             <details style={cardStyle}>
-                <summary style={{cursor: 'pointer', fontWeight: 600}}>{'Advanced JSON preview'}</summary>
+                <summary style={{cursor: 'pointer', fontWeight: 600}}>{'고급 JSON 미리보기'}</summary>
                 <pre style={codeStyle}>{serializeBots(bots)}</pre>
             </details>
         </div>
@@ -620,7 +620,7 @@ function renderDefaultValueEditor(field: DraftInputField, disabled: boolean, onC
                     onChange={(event) => onChange(event.target.checked)}
                     type='checkbox'
                 />
-                {'Checked by default'}
+                {'기본값으로 체크됨'}
             </label>
         );
     }
@@ -670,7 +670,7 @@ function parseStoredBots(rawValue: unknown) {
     try {
         const parsed = typeof rawValue === 'string' ? JSON.parse(rawValue || '[]') : rawValue;
         if (!Array.isArray(parsed)) {
-            return {bots: [] as DraftBotDefinition[], error: 'Saved value is not a JSON array.'};
+            return {bots: [] as DraftBotDefinition[], error: '저장된 값이 JSON 배열 형식이 아닙니다.'};
         }
         return {
             bots: parsed.map((item) => normalizeStoredBot(item as StoredBotDefinition)),
@@ -743,43 +743,43 @@ function validateBots(bots: DraftBotDefinition[]) {
     const seenUsernames = new Set<string>();
 
     bots.forEach((bot, index) => {
-        const label = bot.display_name || bot.username || `Bot ${index + 1}`;
+        const label = bot.display_name || bot.username || `봇 ${index + 1}`;
         const botID = bot.id.trim();
         const username = bot.username.trim();
         const flowID = bot.flow_id.trim();
 
         if (!botID) {
-            messages.push(`${label}: bot id is required.`);
+            messages.push(`${label}: 봇 ID는 필수입니다.`);
         } else if (seenIDs.has(botID)) {
-            messages.push(`${label}: bot id "${botID}" is duplicated.`);
+            messages.push(`${label}: 봇 ID "${botID}"가 중복되었습니다.`);
         } else {
             seenIDs.add(botID);
         }
 
         if (!username) {
-            messages.push(`${label}: bot username is required.`);
+            messages.push(`${label}: 봇 username은 필수입니다.`);
         } else if (seenUsernames.has(username)) {
-            messages.push(`${label}: bot username "${username}" is duplicated.`);
+            messages.push(`${label}: 봇 username "${username}"이 중복되었습니다.`);
         } else {
             seenUsernames.add(username);
         }
 
         if (!bot.display_name.trim()) {
-            messages.push(`${label}: display name is required.`);
+            messages.push(`${label}: 표시 이름은 필수입니다.`);
         }
 
         if (!flowID) {
-            messages.push(`${label}: flow id is required.`);
+            messages.push(`${label}: flow ID는 필수입니다.`);
         }
 
         const seenFields = new Set<string>();
         bot.input_schema.forEach((field, fieldIndex) => {
-            const fieldLabel = field.label || field.name || `Field ${fieldIndex + 1}`;
+            const fieldLabel = field.label || field.name || `필드 ${fieldIndex + 1}`;
             const fieldName = field.name.trim();
             if (!fieldName) {
-                messages.push(`${label}: ${fieldLabel} is missing a field name.`);
+                messages.push(`${label}: ${fieldLabel}에 필드 이름이 없습니다.`);
             } else if (seenFields.has(fieldName)) {
-                messages.push(`${label}: input field "${fieldName}" is duplicated.`);
+                messages.push(`${label}: 입력 필드 "${fieldName}"가 중복되었습니다.`);
             } else {
                 seenFields.add(fieldName);
             }

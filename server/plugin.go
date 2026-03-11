@@ -35,13 +35,14 @@ type botAccount struct {
 }
 
 type botSyncEntry struct {
-	BotID       string `json:"bot_id"`
-	Username    string `json:"username"`
-	DisplayName string `json:"display_name"`
-	FlowID      string `json:"flow_id"`
-	UserID      string `json:"user_id,omitempty"`
-	Registered  bool   `json:"registered"`
-	Active      bool   `json:"active"`
+	BotID         string `json:"bot_id"`
+	Username      string `json:"username"`
+	DisplayName   string `json:"display_name"`
+	FlowID        string `json:"flow_id"`
+	UserID        string `json:"user_id,omitempty"`
+	Registered    bool   `json:"registered"`
+	Active        bool   `json:"active"`
+	StatusMessage string `json:"status_message,omitempty"`
 }
 
 type botSyncState struct {

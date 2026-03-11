@@ -1,10 +1,10 @@
 {
     "id": "com.mattermost.langflow",
     "name": "Langflow",
-    "version": "0.1.4-dev",
-    "description": "Run Langflow flows through dedicated Mattermost bots mapped one-to-one to Langflow flows, with streaming bot replies.",
-    "homepage_url": "https://github.com/mattermost-community/mattermost-langflow-plugin",
-    "support_url": "https://github.com/mattermost-community/mattermost-langflow-plugin/issues",
+    "version": "0.1.5-dev",
+    "description": "Langflow flow와 1:1로 연결된 전용 Mattermost 봇을 통해 스트리밍 AI 응답을 제공합니다.",
+    "homepage_url": "https://github.com/hkjang/mattermost-langflow-plugin",
+    "support_url": "https://github.com/hkjang/mattermost-langflow-plugin/issues",
     "icon_path": "assets/starter-template-icon.svg",
     "min_server_version": "10.0.0",
     "server": {
@@ -20,24 +20,24 @@
         "bundle_path": "webapp/dist/main.js"
     },
     "settings_schema": {
-        "header": "Configure the Langflow endpoint, safety limits, and the bot catalog that maps one Mattermost bot to one Langflow flow.",
+        "header": "Langflow 엔드포인트, 안전 제한, 그리고 Mattermost 봇 1개를 Langflow flow 1개에 매핑하는 봇 카탈로그를 설정합니다.",
         "footer": "",
         "settings": [
             {
                 "key": "LangflowBaseURL",
-                "display_name": "Langflow Base URL",
+                "display_name": "Langflow 기본 URL",
                 "type": "text",
-                "help_text": "Base URL for the Langflow server, for example https://langflow.example.com.",
+                "help_text": "Langflow 서버의 기본 URL입니다. 예: https://langflow.example.com",
                 "placeholder": "https://langflow.example.com"
             },
             {
                 "key": "LangflowAuthMode",
-                "display_name": "Auth Header Mode",
+                "display_name": "인증 헤더 방식",
                 "type": "dropdown",
-                "help_text": "Choose whether the token is sent as a Bearer token or as x-api-key.",
+                "help_text": "토큰을 Bearer 방식으로 보낼지, x-api-key 헤더로 보낼지 선택합니다.",
                 "options": [
                     {
-                        "display_name": "Bearer Token",
+                        "display_name": "Bearer 토큰",
                         "value": "bearer"
                     },
                     {
@@ -49,82 +49,82 @@
             },
             {
                 "key": "LangflowAuthToken",
-                "display_name": "Langflow API Token",
+                "display_name": "Langflow API 토큰",
                 "type": "text",
-                "help_text": "Secret used to authenticate with Langflow.",
+                "help_text": "Langflow 인증에 사용하는 비밀 토큰입니다.",
                 "secret": true
             },
             {
                 "key": "AllowHosts",
-                "display_name": "Allowed Hosts",
+                "display_name": "허용 호스트",
                 "type": "text",
-                "help_text": "Comma-separated hostnames allowed for outbound Langflow calls. Leave empty to default to the Langflow host only.",
+                "help_text": "외부 Langflow 호출을 허용할 호스트명을 쉼표로 구분해 입력합니다. 비워 두면 Langflow 기본 URL의 호스트만 허용합니다.",
                 "placeholder": "langflow.example.com, *.internal.example.com"
             },
             {
                 "key": "BotDefinitions",
-                "display_name": "Langflow Bots",
+                "display_name": "Langflow 봇 설정",
                 "type": "custom"
             },
             {
                 "key": "DefaultTimeoutSeconds",
-                "display_name": "Default Timeout (seconds)",
+                "display_name": "기본 타임아웃(초)",
                 "type": "text",
-                "help_text": "Timeout applied to Langflow requests.",
+                "help_text": "Langflow 요청에 적용할 타임아웃입니다.",
                 "default": "30"
             },
             {
                 "key": "EnableStreaming",
-                "display_name": "Enable Streaming Replies",
+                "display_name": "스트리밍 응답 사용",
                 "type": "bool",
-                "help_text": "When enabled, the plugin calls Langflow with ?stream=true and updates the same bot post as chunks arrive.",
+                "help_text": "활성화하면 플러그인이 Langflow를 ?stream=true로 호출하고, 청크가 도착할 때마다 같은 봇 포스트를 갱신합니다.",
                 "default": true
             },
             {
                 "key": "StreamingUpdateMS",
-                "display_name": "Streaming Update Interval (ms)",
+                "display_name": "스트리밍 갱신 주기(ms)",
                 "type": "text",
-                "help_text": "Minimum delay between Mattermost post updates while streaming. Lower values feel faster but create more update traffic.",
+                "help_text": "스트리밍 중 Mattermost 포스트를 갱신할 때 적용할 최소 간격입니다. 값이 낮을수록 반응은 빠르지만 업데이트 트래픽은 늘어납니다.",
                 "default": "350"
             },
             {
                 "key": "MaxInputLength",
-                "display_name": "Max Input Length",
+                "display_name": "최대 입력 길이",
                 "type": "text",
-                "help_text": "Maximum characters accepted from a user prompt before the request is rejected.",
+                "help_text": "사용자 프롬프트에서 허용할 최대 문자 수입니다. 초과하면 요청을 거부합니다.",
                 "default": "4000"
             },
             {
                 "key": "MaxOutputLength",
-                "display_name": "Max Output Length",
+                "display_name": "최대 출력 길이",
                 "type": "text",
-                "help_text": "Maximum characters written back to Mattermost after truncation.",
+                "help_text": "Mattermost에 다시 쓸 최대 문자 수입니다. 초과 시 잘라서 저장합니다.",
                 "default": "8000"
             },
             {
                 "key": "ContextPostLimit",
-                "display_name": "Context Post Limit",
+                "display_name": "컨텍스트 포스트 수 제한",
                 "type": "text",
-                "help_text": "Maximum number of recent thread or channel posts attached as context.",
+                "help_text": "컨텍스트로 첨부할 최근 스레드 또는 채널 포스트 수의 최대값입니다.",
                 "default": "8"
             },
             {
                 "key": "EnableDebugLogs",
-                "display_name": "Enable Debug Logs",
+                "display_name": "디버그 로그 사용",
                 "type": "bool",
-                "help_text": "Emit correlation ids, payload summaries, and config diagnostics to the plugin log.",
+                "help_text": "correlation id, payload 요약, 설정 진단 정보를 플러그인 로그에 남깁니다.",
                 "default": false
             },
             {
                 "key": "EnableUsageLogs",
-                "display_name": "Enable Usage Logs",
+                "display_name": "사용 로그 기록",
                 "type": "bool",
-                "help_text": "Record who executed which bot and Langflow flow, and whether it succeeded.",
+                "help_text": "누가 어떤 봇과 Langflow flow를 실행했는지, 성공 여부와 함께 기록합니다.",
                 "default": true
             },
             {
                 "key": "StatusPanel",
-                "display_name": "Connection Status",
+                "display_name": "연결 상태",
                 "type": "custom"
             }
         ]
