@@ -35,11 +35,17 @@ type pluginStatusResponse struct {
 	Connection                *langflowConnectionStatus `json:"connection,omitempty"`
 }
 
+type adminConfigResponse struct {
+	Config storedPluginConfig `json:"config"`
+	Source string             `json:"source"`
+}
+
 func (p *Plugin) initRouter() *mux.Router {
 	router := mux.NewRouter()
 	router.Use(p.MattermostAuthorizationRequired)
 
 	apiRouter := router.PathPrefix("/api/v1").Subrouter()
+	apiRouter.HandleFunc("/config", p.handleAdminConfig).Methods(http.MethodGet)
 	apiRouter.HandleFunc("/status", p.handleStatus).Methods(http.MethodGet)
 	apiRouter.HandleFunc("/bots", p.handleBots).Methods(http.MethodGet)
 	apiRouter.HandleFunc("/history", p.handleHistory).Methods(http.MethodGet)
@@ -88,6 +94,25 @@ func (p *Plugin) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	status.StreamingEnabled = runtimeCfg.EnableStreaming
 	status.StreamingUpdateIntervalMS = runtimeCfg.StreamingUpdateInterval.Milliseconds()
 	writeJSON(w, http.StatusOK, status)
+}
+
+func (p *Plugin) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
+	userID := r.Header.Get("Mattermost-User-ID")
+	if !p.client.User.HasPermissionTo(userID, model.PermissionManageSystem) {
+		writeError(w, http.StatusForbidden, errors.New("only system administrators can access plugin configuration"))
+		return
+	}
+
+	stored, source, err := p.getConfiguration().getStoredPluginConfig()
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, adminConfigResponse{
+		Config: stored,
+		Source: source,
+	})
 }
 
 func (p *Plugin) handleBots(w http.ResponseWriter, r *http.Request) {

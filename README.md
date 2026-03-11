@@ -5,7 +5,7 @@ Mattermost channels, threads, and DMs can trigger Langflow flows through dedicat
 ## MVP scope
 
 - Langflow single-endpoint integration
-- System Console configuration for the Langflow server, auth token, allowlist, limits, and a visual multi-bot catalog editor
+- Agents-style System Console configuration with one custom `Config` screen for service settings, bot catalog, runtime policy, and status
 - Multiple Mattermost bot accounts, each bound to one Langflow flow
 - Bot mention and DM trigger through `@bot-username`
 - Streaming bot replies by updating a single Mattermost post as Langflow tokens arrive
@@ -21,37 +21,54 @@ Mattermost channels, threads, and DMs can trigger Langflow flows through dedicat
 - `webapp/`: Mattermost webapp bundle for the RHS runner and admin custom settings
 - `plugin.json`: Mattermost manifest and System Console schema
 
-## Bot catalog format
+## Config format
 
-`BotDefinitions` in the System Console expects a JSON array like this:
+The System Console now stores one `Config` JSON document. The admin UI edits this automatically, but the persisted shape looks like this:
 
 ```json
-[
-  {
-    "id": "thread-summary-bot",
-    "username": "thread-summary-bot",
-    "display_name": "Thread Summary Bot",
-    "description": "Summarize the current conversation thread.",
-    "flow_id": "thread-summary",
-    "include_context_by_default": true,
-    "allowed_teams": ["engineering"],
-    "allowed_channels": ["town-square"],
-    "allowed_users": ["sysadmin"],
-    "input_schema": [
-      {
-        "name": "tone",
-        "label": "Tone",
-        "type": "text",
-        "placeholder": "concise",
-        "default_value": "concise"
-      }
-    ]
-  }
-]
+{
+  "service": {
+    "base_url": "https://langflow.example.com",
+    "auth_mode": "bearer",
+    "auth_token": "YOUR_API_KEY",
+    "allow_hosts": "langflow.example.com"
+  },
+  "runtime": {
+    "default_timeout_seconds": 30,
+    "enable_streaming": true,
+    "streaming_update_ms": 350,
+    "max_input_length": 4000,
+    "max_output_length": 8000,
+    "context_post_limit": 8,
+    "enable_debug_logs": false,
+    "enable_usage_logs": true
+  },
+  "bots": [
+    {
+      "id": "thread-summary-bot",
+      "username": "thread-summary-bot",
+      "display_name": "Thread Summary Bot",
+      "description": "Summarize the current conversation thread.",
+      "flow_id": "thread-summary",
+      "include_context_by_default": true,
+      "allowed_teams": ["engineering"],
+      "allowed_channels": ["town-square"],
+      "allowed_users": ["sysadmin"],
+      "input_schema": [
+        {
+          "name": "tone",
+          "label": "Tone",
+          "type": "text",
+          "placeholder": "concise",
+          "default_value": "concise"
+        }
+      ]
+    }
+  ]
+}
 ```
 
-Each bot definition creates or updates one Mattermost bot account and binds it to one Langflow flow. Additional input fields are appended to the prompt before the plugin sends the request to Langflow.
-Saving the System Console configuration applies those bot definitions immediately, so the plugin creates, updates, or deactivates its managed Mattermost bot accounts to match the catalog.
+Each bot definition creates or updates one Mattermost bot account and binds it to one Langflow flow. The admin UI derives the internal bot identifier from `username`, so admins no longer need to enter a separate bot ID manually. Saving the System Console configuration applies those bot definitions immediately, so the plugin creates, updates, or deactivates its managed Mattermost bot accounts to match the catalog.
 
 ## Langflow request shape
 
@@ -80,3 +97,4 @@ The plugin builds `input_value` from the user prompt, optional structured inputs
 
 - Team, channel, and user access filters are supported per bot. Group-level policy is still a follow-up item.
 - The plugin no longer relies on a slash command. Bot mention, DM, and RHS execution are the primary entry points.
+- Mattermost may still log `no signature when persisting plugin to filestore` for custom uploads. Per Mattermost's plugin signing docs, that warning is expected until the release bundle is signed and the server trusts the signing key.

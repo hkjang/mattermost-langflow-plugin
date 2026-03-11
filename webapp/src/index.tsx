@@ -5,10 +5,9 @@ import type {Store} from 'redux';
 import type {GlobalState} from '@mattermost/types/store';
 
 import {setSiteURL} from './client';
-import BotDefinitionsSetting from './components/bot_definitions_setting';
+import ConfigSetting from './components/config_setting';
 import PluginErrorBoundary from './components/error_boundary';
 import RHSPane from './components/rhs';
-import StatusPanel from './components/status_panel';
 import type {PluginRegistry} from './types/mattermost-webapp';
 
 const LangflowTitle = () => {
@@ -35,15 +34,9 @@ const badgeStyle: React.CSSProperties = {
 
 const HeaderIcon = () => <span style={badgeStyle}>{'LF'}</span>;
 
-const SafeBotDefinitionsSetting = (props: React.ComponentProps<typeof BotDefinitionsSetting>) => (
-    <PluginErrorBoundary area={'봇 설정'}>
-        <BotDefinitionsSetting {...props}/>
-    </PluginErrorBoundary>
-);
-
-const SafeStatusPanel = () => (
-    <PluginErrorBoundary area={'상태 패널'}>
-        <StatusPanel/>
+const SafeConfigSetting = (props: React.ComponentProps<typeof ConfigSetting>) => (
+    <PluginErrorBoundary area={'관리자 설정'}>
+        <ConfigSetting {...props}/>
     </PluginErrorBoundary>
 );
 
@@ -62,8 +55,7 @@ export default class Plugin {
         setSiteURL(siteURL);
 
         if (registry.registerAdminConsoleCustomSetting) {
-            registry.registerAdminConsoleCustomSetting('BotDefinitions', SafeBotDefinitionsSetting, {showTitle: true});
-            registry.registerAdminConsoleCustomSetting('StatusPanel', SafeStatusPanel, {showTitle: true});
+            registry.registerAdminConsoleCustomSetting('Config', SafeConfigSetting);
         }
 
         if (registry.registerRightHandSidebarComponent) {

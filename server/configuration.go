@@ -20,6 +20,7 @@ const (
 )
 
 type configuration struct {
+	Config                string `json:"Config"`
 	LangflowBaseURL       string `json:"LangflowBaseURL"`
 	LangflowAuthMode      string `json:"LangflowAuthMode"`
 	LangflowAuthToken     string `json:"LangflowAuthToken"`
@@ -34,6 +35,30 @@ type configuration struct {
 	EnableDebugLogs       bool   `json:"EnableDebugLogs"`
 	EnableUsageLogs       bool   `json:"EnableUsageLogs"`
 	StatusPanel           string `json:"StatusPanel"`
+}
+
+type storedPluginConfig struct {
+	Service storedServiceConfig `json:"service"`
+	Runtime storedRuntimeConfig `json:"runtime"`
+	Bots    []BotDefinition     `json:"bots"`
+}
+
+type storedServiceConfig struct {
+	BaseURL    string `json:"base_url"`
+	AuthMode   string `json:"auth_mode"`
+	AuthToken  string `json:"auth_token"`
+	AllowHosts string `json:"allow_hosts"`
+}
+
+type storedRuntimeConfig struct {
+	DefaultTimeoutSeconds int  `json:"default_timeout_seconds"`
+	EnableStreaming       bool `json:"enable_streaming"`
+	StreamingUpdateMS     int  `json:"streaming_update_ms"`
+	MaxInputLength        int  `json:"max_input_length"`
+	MaxOutputLength       int  `json:"max_output_length"`
+	ContextPostLimit      int  `json:"context_post_limit"`
+	EnableDebugLogs       bool `json:"enable_debug_logs"`
+	EnableUsageLogs       bool `json:"enable_usage_logs"`
 }
 
 type runtimeConfiguration struct {
@@ -59,19 +84,99 @@ func (c *configuration) Clone() *configuration {
 }
 
 func (c *configuration) normalize() (*runtimeConfiguration, error) {
-	cfg := &runtimeConfiguration{
-		LangflowBaseURL:   strings.TrimSpace(c.LangflowBaseURL),
-		LangflowAuthMode:  normalizeAuthMode(c.LangflowAuthMode),
-		LangflowAuthToken: strings.TrimSpace(c.LangflowAuthToken),
-		EnableStreaming:   c.EnableStreaming,
-		MaxInputLength:    parsePositiveInt(c.MaxInputLength, defaultMaxInputLength),
-		MaxOutputLength:   parsePositiveInt(c.MaxOutputLength, defaultMaxOutputLength),
-		ContextPostLimit:  parsePositiveInt(c.ContextPostLimit, defaultContextPostLimit),
-		EnableDebugLogs:   c.EnableDebugLogs,
-		EnableUsageLogs:   c.EnableUsageLogs,
+	stored, _, err := c.getStoredPluginConfig()
+	if err != nil {
+		return nil, err
 	}
-	cfg.DefaultTimeout = time.Duration(parsePositiveInt(c.DefaultTimeoutSeconds, defaultTimeoutSeconds)) * time.Second
-	cfg.StreamingUpdateInterval = time.Duration(parsePositiveInt(c.StreamingUpdateMS, defaultStreamIntervalMS)) * time.Millisecond
+	return stored.normalize()
+}
+
+func (c *configuration) getStoredPluginConfig() (storedPluginConfig, string, error) {
+	if strings.TrimSpace(c.Config) != "" {
+		stored, err := parseStoredPluginConfig(c.Config)
+		if err != nil {
+			return storedPluginConfig{}, "config", err
+		}
+		return stored, "config", nil
+	}
+
+	stored, err := c.legacyStoredPluginConfig()
+	if err != nil {
+		return storedPluginConfig{}, "legacy", err
+	}
+	return stored, "legacy", nil
+}
+
+func (c *configuration) legacyStoredPluginConfig() (storedPluginConfig, error) {
+	bots, err := parseBotDefinitions(c.BotDefinitions)
+	if err != nil {
+		return storedPluginConfig{}, err
+	}
+
+	return storedPluginConfig{
+		Service: storedServiceConfig{
+			BaseURL:    strings.TrimSpace(c.LangflowBaseURL),
+			AuthMode:   normalizeAuthMode(c.LangflowAuthMode),
+			AuthToken:  strings.TrimSpace(c.LangflowAuthToken),
+			AllowHosts: strings.TrimSpace(c.AllowHosts),
+		},
+		Runtime: storedRuntimeConfig{
+			DefaultTimeoutSeconds: parsePositiveInt(c.DefaultTimeoutSeconds, defaultTimeoutSeconds),
+			EnableStreaming:       c.EnableStreaming,
+			StreamingUpdateMS:     parsePositiveInt(c.StreamingUpdateMS, defaultStreamIntervalMS),
+			MaxInputLength:        parsePositiveInt(c.MaxInputLength, defaultMaxInputLength),
+			MaxOutputLength:       parsePositiveInt(c.MaxOutputLength, defaultMaxOutputLength),
+			ContextPostLimit:      parsePositiveInt(c.ContextPostLimit, defaultContextPostLimit),
+			EnableDebugLogs:       c.EnableDebugLogs,
+			EnableUsageLogs:       c.EnableUsageLogs,
+		},
+		Bots: bots,
+	}, nil
+}
+
+func parseStoredPluginConfig(raw string) (storedPluginConfig, error) {
+	cfg := defaultStoredPluginConfig()
+	if strings.TrimSpace(raw) == "" {
+		return cfg, nil
+	}
+	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+		return storedPluginConfig{}, fmt.Errorf("invalid Config JSON: %w", err)
+	}
+	return cfg, nil
+}
+
+func defaultStoredPluginConfig() storedPluginConfig {
+	return storedPluginConfig{
+		Service: storedServiceConfig{
+			AuthMode: defaultAuthMode,
+		},
+		Runtime: storedRuntimeConfig{
+			DefaultTimeoutSeconds: defaultTimeoutSeconds,
+			EnableStreaming:       true,
+			StreamingUpdateMS:     defaultStreamIntervalMS,
+			MaxInputLength:        defaultMaxInputLength,
+			MaxOutputLength:       defaultMaxOutputLength,
+			ContextPostLimit:      defaultContextPostLimit,
+			EnableUsageLogs:       true,
+		},
+		Bots: []BotDefinition{},
+	}
+}
+
+func (c storedPluginConfig) normalize() (*runtimeConfiguration, error) {
+	cfg := &runtimeConfiguration{
+		LangflowBaseURL:   strings.TrimSpace(c.Service.BaseURL),
+		LangflowAuthMode:  normalizeAuthMode(c.Service.AuthMode),
+		LangflowAuthToken: strings.TrimSpace(c.Service.AuthToken),
+		EnableStreaming:   c.Runtime.EnableStreaming,
+		MaxInputLength:    positiveOrDefault(c.Runtime.MaxInputLength, defaultMaxInputLength),
+		MaxOutputLength:   positiveOrDefault(c.Runtime.MaxOutputLength, defaultMaxOutputLength),
+		ContextPostLimit:  positiveOrDefault(c.Runtime.ContextPostLimit, defaultContextPostLimit),
+		EnableDebugLogs:   c.Runtime.EnableDebugLogs,
+		EnableUsageLogs:   c.Runtime.EnableUsageLogs,
+	}
+	cfg.DefaultTimeout = time.Duration(positiveOrDefault(c.Runtime.DefaultTimeoutSeconds, defaultTimeoutSeconds)) * time.Second
+	cfg.StreamingUpdateInterval = time.Duration(positiveOrDefault(c.Runtime.StreamingUpdateMS, defaultStreamIntervalMS)) * time.Millisecond
 
 	if cfg.LangflowBaseURL != "" {
 		parsedURL, err := url.Parse(cfg.LangflowBaseURL)
@@ -85,12 +190,17 @@ func (c *configuration) normalize() (*runtimeConfiguration, error) {
 		cfg.ParsedBaseURL = parsedURL
 	}
 
-	bots, err := parseBotDefinitions(c.BotDefinitions)
+	serializedBots, err := json.Marshal(c.Bots)
+	if err != nil {
+		return nil, fmt.Errorf("failed to serialize bot definitions: %w", err)
+	}
+
+	bots, err := parseBotDefinitions(string(serializedBots))
 	if err != nil {
 		return nil, err
 	}
 	cfg.BotDefinitions = bots
-	cfg.AllowHosts = normalizeAllowHosts(c.AllowHosts, cfg.ParsedBaseURL)
+	cfg.AllowHosts = normalizeAllowHosts(c.Service.AllowHosts, cfg.ParsedBaseURL)
 
 	return cfg, nil
 }
@@ -137,6 +247,13 @@ func normalizeAllowHosts(raw string, parsedBaseURL *url.URL) []string {
 func parsePositiveInt(raw string, fallback int) int {
 	var value int
 	if _, err := fmt.Sscanf(strings.TrimSpace(raw), "%d", &value); err != nil || value <= 0 {
+		return fallback
+	}
+	return value
+}
+
+func positiveOrDefault(value, fallback int) int {
+	if value <= 0 {
 		return fallback
 	}
 	return value

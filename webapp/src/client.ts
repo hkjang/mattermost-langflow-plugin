@@ -66,6 +66,31 @@ export type PluginStatus = {
     config_error?: string;
 };
 
+export type AdminPluginConfig = {
+    service: {
+        base_url: string;
+        auth_mode: string;
+        auth_token: string;
+        allow_hosts: string;
+    };
+    runtime: {
+        default_timeout_seconds: number;
+        enable_streaming: boolean;
+        streaming_update_ms: number;
+        max_input_length: number;
+        max_output_length: number;
+        context_post_limit: number;
+        enable_debug_logs: boolean;
+        enable_usage_logs: boolean;
+    };
+    bots: BotDefinition[];
+};
+
+export type AdminConfigResponse = {
+    config: AdminPluginConfig;
+    source: string;
+};
+
 export type ManagedBotStatus = {
     bot_id: string;
     username: string;
@@ -118,6 +143,10 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
 export async function getStatus() {
     return request<PluginStatus>('/status');
+}
+
+export async function getAdminConfig() {
+    return request<AdminConfigResponse>('/config');
 }
 
 export async function testConnection() {

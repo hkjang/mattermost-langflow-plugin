@@ -94,9 +94,9 @@ func normalizeStringSlice(items []string) []string {
 }
 
 func (cfg *runtimeConfiguration) getBotByID(botID string) *BotDefinition {
-	botID = strings.TrimSpace(botID)
+	botID = strings.ToLower(strings.TrimSpace(botID))
 	for _, bot := range cfg.BotDefinitions {
-		if bot.ID == botID {
+		if strings.ToLower(bot.ID) == botID || strings.ToLower(bot.Username) == botID {
 			item := bot
 			return &item
 		}

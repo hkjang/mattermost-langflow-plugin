@@ -145,7 +145,19 @@ export type PluginConfigurationRadioSetting = BasePluginConfigurationSetting & {
     options: PluginConfigurationRadioSettingOption[];
 };
 
-export type PluginCustomSettingComponent = React.ComponentType<{informChange: (name: string, value: string) => void}>;
+export type PluginCustomSettingComponent = React.ComponentType<{
+    id?: string;
+    label?: string;
+    helpText?: React.ReactNode;
+    value?: unknown;
+    disabled?: boolean;
+    setByEnv?: boolean;
+    onChange?: (id: string, value: unknown) => void;
+    informChange?: (name: string, value: string) => void;
+    setSaveNeeded?: () => void;
+    registerSaveAction?: (action: () => Promise<{error?: {message?: string}}>) => void;
+    unRegisterSaveAction?: (action: () => Promise<{error?: {message?: string}}>) => void;
+}>;
 
 export type PluginConfigurationCustomSetting = BasePluginConfigurationSetting & {
     type: 'custom';
