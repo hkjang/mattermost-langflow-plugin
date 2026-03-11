@@ -59,7 +59,25 @@ export type PluginStatus = {
     bot_count: number;
     allow_hosts: string[];
     bots: BotDefinition[];
+    managed_bots: ManagedBotStatus[];
+    bot_sync: BotSyncState;
     config_error?: string;
+};
+
+export type ManagedBotStatus = {
+    bot_id: string;
+    username: string;
+    display_name: string;
+    flow_id: string;
+    user_id?: string;
+    registered: boolean;
+    active: boolean;
+};
+
+export type BotSyncState = {
+    last_error?: string;
+    updated_at: number;
+    entries: ManagedBotStatus[];
 };
 
 export type ConnectionStatus = {

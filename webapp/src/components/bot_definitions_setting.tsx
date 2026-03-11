@@ -257,6 +257,9 @@ export default function BotDefinitionsSetting(props: CustomSettingProps) {
                 <span style={{fontSize: '12px', opacity: 0.8}}>
                     {'When a bot runs, the plugin calls POST /api/v1/run/$FLOW_ID and sends a JSON body with input_value built from the prompt, optional form fields, and optional conversation context.'}
                 </span>
+                <span style={{fontSize: '12px', opacity: 0.8}}>
+                    {'After you click Save in the System Console, the plugin creates or updates the matching Mattermost bot accounts automatically.'}
+                </span>
                 {props.helpText}
                 {props.setByEnv && (
                     <span style={{color: 'var(--error-text)', fontSize: '12px'}}>

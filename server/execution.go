@@ -240,15 +240,37 @@ func (p *Plugin) ensureBots() error {
 	cfg, err := p.getRuntimeConfiguration()
 	if err != nil {
 		p.setBotAccounts(map[string]botAccount{})
+		p.setBotSyncState(botSyncState{
+			LastError: err.Error(),
+			UpdatedAt: time.Now().UnixMilli(),
+			Entries:   []botSyncEntry{},
+		})
 		return err
 	}
 	if len(cfg.BotDefinitions) == 0 {
 		p.setBotAccounts(map[string]botAccount{})
+		if err := p.deactivateManagedBots(nil); err != nil {
+			p.setBotSyncState(botSyncState{
+				LastError: err.Error(),
+				UpdatedAt: time.Now().UnixMilli(),
+				Entries:   []botSyncEntry{},
+			})
+			return err
+		}
+		p.setBotSyncState(botSyncState{
+			UpdatedAt: time.Now().UnixMilli(),
+			Entries:   []botSyncEntry{},
+		})
 		return nil
 	}
 
 	bots, err := p.client.Bot.List(0, 200, pluginapi.BotOwner(manifest.Id), pluginapi.BotIncludeDeleted())
 	if err != nil {
+		p.setBotSyncState(botSyncState{
+			LastError: err.Error(),
+			UpdatedAt: time.Now().UnixMilli(),
+			Entries:   []botSyncEntry{},
+		})
 		return fmt.Errorf("failed to list plugin bots: %w", err)
 	}
 
@@ -261,18 +283,48 @@ func (p *Plugin) ensureBots() error {
 	}
 
 	accounts := make(map[string]botAccount, len(cfg.BotDefinitions))
+	syncEntries := make([]botSyncEntry, 0, len(cfg.BotDefinitions))
+	configuredUsernames := make(map[string]struct{}, len(cfg.BotDefinitions))
 	for _, definition := range cfg.BotDefinitions {
+		configuredUsernames[definition.Username] = struct{}{}
 		userID, err := p.ensureSingleBot(existingByUsername, definition)
 		if err != nil {
+			p.setBotSyncState(botSyncState{
+				LastError: err.Error(),
+				UpdatedAt: time.Now().UnixMilli(),
+				Entries:   syncEntries,
+			})
 			return err
 		}
 		accounts[definition.ID] = botAccount{
 			Definition: definition,
 			UserID:     userID,
 		}
+		syncEntries = append(syncEntries, botSyncEntry{
+			BotID:       definition.ID,
+			Username:    definition.Username,
+			DisplayName: definition.DisplayName,
+			FlowID:      definition.FlowID,
+			UserID:      userID,
+			Registered:  true,
+			Active:      true,
+		})
+	}
+
+	if err := p.deactivateManagedBots(configuredUsernames); err != nil {
+		p.setBotSyncState(botSyncState{
+			LastError: err.Error(),
+			UpdatedAt: time.Now().UnixMilli(),
+			Entries:   syncEntries,
+		})
+		return err
 	}
 
 	p.setBotAccounts(accounts)
+	p.setBotSyncState(botSyncState{
+		UpdatedAt: time.Now().UnixMilli(),
+		Entries:   syncEntries,
+	})
 	return nil
 }
 
@@ -292,6 +344,7 @@ func (p *Plugin) ensureSingleBot(existingByUsername map[string]*model.Bot, defin
 		if _, err := p.client.Bot.UpdateActive(existing.UserId, true); err != nil {
 			return "", fmt.Errorf("failed to activate Langflow bot %q: %w", definition.Username, err)
 		}
+		p.API.LogInfo("Ensured Langflow bot", "bot_username", definition.Username, "flow_id", definition.FlowID, "action", "updated")
 		return existing.UserId, nil
 	}
 
@@ -304,7 +357,30 @@ func (p *Plugin) ensureSingleBot(existingByUsername map[string]*model.Bot, defin
 		return "", fmt.Errorf("failed to create Langflow bot %q: %w", definition.Username, err)
 	}
 
+	p.API.LogInfo("Ensured Langflow bot", "bot_username", definition.Username, "flow_id", definition.FlowID, "action", "created")
 	return newBot.UserId, nil
+}
+
+func (p *Plugin) deactivateManagedBots(configuredUsernames map[string]struct{}) error {
+	bots, err := p.client.Bot.List(0, 200, pluginapi.BotOwner(manifest.Id), pluginapi.BotIncludeDeleted())
+	if err != nil {
+		return fmt.Errorf("failed to list plugin bots for deactivation: %w", err)
+	}
+
+	for _, bot := range bots {
+		if bot == nil {
+			continue
+		}
+		if _, keep := configuredUsernames[strings.ToLower(bot.Username)]; keep {
+			continue
+		}
+		if _, err := p.client.Bot.UpdateActive(bot.UserId, false); err != nil {
+			return fmt.Errorf("failed to deactivate removed Langflow bot %q: %w", bot.Username, err)
+		}
+		p.API.LogInfo("Deactivated removed Langflow bot", "bot_username", bot.Username, "user_id", bot.UserId)
+	}
+
+	return nil
 }
 
 func (p *Plugin) ensureBotInChannel(channelID, botUserID string) error {

@@ -27,6 +27,8 @@ type pluginStatusResponse struct {
 	BotCount    int                       `json:"bot_count"`
 	AllowHosts  []string                  `json:"allow_hosts"`
 	Bots        []BotDefinition           `json:"bots"`
+	ManagedBots []botSyncEntry            `json:"managed_bots"`
+	BotSync     botSyncState              `json:"bot_sync"`
 	ConfigError string                    `json:"config_error,omitempty"`
 	Connection  *langflowConnectionStatus `json:"connection,omitempty"`
 }
@@ -62,9 +64,11 @@ func (p *Plugin) MattermostAuthorizationRequired(next http.Handler) http.Handler
 func (p *Plugin) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	cfg := p.getConfiguration()
 	status := pluginStatusResponse{
-		PluginID: manifest.Id,
-		BaseURL:  strings.TrimSpace(cfg.LangflowBaseURL),
-		Bots:     []BotDefinition{},
+		PluginID:    manifest.Id,
+		BaseURL:     strings.TrimSpace(cfg.LangflowBaseURL),
+		Bots:        []BotDefinition{},
+		ManagedBots: []botSyncEntry{},
+		BotSync:     p.getBotSyncState(),
 	}
 
 	runtimeCfg, err := cfg.normalize()
@@ -78,6 +82,7 @@ func (p *Plugin) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	status.AllowHosts = runtimeCfg.AllowHosts
 	status.BaseURL = runtimeCfg.LangflowBaseURL
 	status.Bots = runtimeCfg.BotDefinitions
+	status.ManagedBots = status.BotSync.Entries
 	writeJSON(w, http.StatusOK, status)
 }
 

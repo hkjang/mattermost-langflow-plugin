@@ -24,11 +24,30 @@ type Plugin struct {
 
 	botAccountsLock sync.RWMutex
 	botAccounts     map[string]botAccount
+
+	botSyncStateLock sync.RWMutex
+	botSyncState     botSyncState
 }
 
 type botAccount struct {
 	Definition BotDefinition
 	UserID     string
+}
+
+type botSyncEntry struct {
+	BotID       string `json:"bot_id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+	FlowID      string `json:"flow_id"`
+	UserID      string `json:"user_id,omitempty"`
+	Registered  bool   `json:"registered"`
+	Active      bool   `json:"active"`
+}
+
+type botSyncState struct {
+	LastError string         `json:"last_error,omitempty"`
+	UpdatedAt int64          `json:"updated_at"`
+	Entries   []botSyncEntry `json:"entries"`
 }
 
 func (p *Plugin) OnActivate() error {
@@ -250,4 +269,18 @@ func (p *Plugin) listBotAccounts() []botAccount {
 		return accounts[i].Definition.Username < accounts[j].Definition.Username
 	})
 	return accounts
+}
+
+func (p *Plugin) setBotSyncState(state botSyncState) {
+	p.botSyncStateLock.Lock()
+	defer p.botSyncStateLock.Unlock()
+
+	p.botSyncState = state
+}
+
+func (p *Plugin) getBotSyncState() botSyncState {
+	p.botSyncStateLock.RLock()
+	defer p.botSyncStateLock.RUnlock()
+
+	return p.botSyncState
 }

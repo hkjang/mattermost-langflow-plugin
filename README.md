@@ -50,6 +50,7 @@ Mattermost channels, threads, and DMs can trigger Langflow flows through dedicat
 ```
 
 Each bot definition creates or updates one Mattermost bot account and binds it to one Langflow flow. Additional input fields are appended to the prompt before the plugin sends the request to Langflow.
+Saving the System Console configuration applies those bot definitions immediately, so the plugin creates, updates, or deactivates its managed Mattermost bot accounts to match the catalog.
 
 ## Langflow request shape
 
