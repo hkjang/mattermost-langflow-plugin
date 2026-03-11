@@ -59,6 +59,7 @@ type streamingPostUpdater struct {
 const (
 	postStreamingControlStart = "start"
 	postStreamingControlEnd   = "end"
+	langflowBotPostType       = "custom_langflow_bot"
 )
 
 func (p *Plugin) executeBotAndPost(ctx context.Context, request BotRunRequest) (*BotRunResult, error) {
@@ -476,12 +477,14 @@ func (p *Plugin) postSuccess(channel *model.Channel, rootID string, account botA
 		UserId:    account.UserID,
 		ChannelId: channel.Id,
 		RootId:    rootID,
+		Type:      langflowBotPostType,
 		Message:   buildBotResponseMessage(account.Definition.DisplayName, output, correlationID, false),
 		Props: map[string]any{
-			"from_bot":         "true",
-			"langflow_bot_id":  account.Definition.ID,
-			"langflow_flow_id": account.Definition.FlowID,
-			"langflow_stream":  "false",
+			"from_bot":                "true",
+			"langflow_bot_id":         account.Definition.ID,
+			"langflow_correlation_id": correlationID,
+			"langflow_flow_id":        account.Definition.FlowID,
+			"langflow_stream":         "false",
 		},
 	})
 	if appErr != nil {
@@ -499,14 +502,16 @@ func (p *Plugin) postFailure(channel *model.Channel, rootID string, account botA
 		UserId:    account.UserID,
 		ChannelId: channel.Id,
 		RootId:    rootID,
+		Type:      langflowBotPostType,
 		Message:   buildBotFailureMessage(account.Definition, correlationID, failure),
 		Props: map[string]any{
-			"from_bot":            "true",
-			"langflow_bot_id":     account.Definition.ID,
-			"langflow_flow_id":    account.Definition.FlowID,
-			"langflow_error":      "true",
-			"langflow_stream":     "false",
-			"langflow_error_code": failure.ErrorCode,
+			"from_bot":                "true",
+			"langflow_bot_id":         account.Definition.ID,
+			"langflow_correlation_id": correlationID,
+			"langflow_flow_id":        account.Definition.FlowID,
+			"langflow_error":          "true",
+			"langflow_stream":         "false",
+			"langflow_error_code":     failure.ErrorCode,
 		},
 	})
 	if appErr != nil {
@@ -527,6 +532,7 @@ func (p *Plugin) postInstruction(channel *model.Channel, rootID string, account 
 		UserId:    account.UserID,
 		ChannelId: channel.Id,
 		RootId:    rootID,
+		Type:      langflowBotPostType,
 		Message:   strings.TrimSpace(message),
 		Props: map[string]any{
 			"from_bot":        "true",
@@ -597,14 +603,16 @@ func (p *Plugin) createStreamingPost(channel *model.Channel, rootID string, acco
 		UserId:    account.UserID,
 		ChannelId: channel.Id,
 		RootId:    rootID,
+		Type:      langflowBotPostType,
 		Message:   buildBotStreamingMessage(account.Definition.DisplayName, ""),
 		Props: map[string]any{
-			"from_bot":               "true",
-			"langflow_bot_id":        account.Definition.ID,
-			"langflow_flow_id":       account.Definition.FlowID,
-			"langflow_stream":        "true",
-			"langflow_streaming":     "true",
-			"langflow_stream_status": "streaming",
+			"from_bot":                "true",
+			"langflow_bot_id":         account.Definition.ID,
+			"langflow_correlation_id": correlationID,
+			"langflow_flow_id":        account.Definition.FlowID,
+			"langflow_stream":         "true",
+			"langflow_streaming":      "true",
+			"langflow_stream_status":  "streaming",
 		},
 	})
 	if appErr != nil {

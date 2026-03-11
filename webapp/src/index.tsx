@@ -7,7 +7,10 @@ import type {GlobalState} from '@mattermost/types/store';
 import {setSiteURL} from './client';
 import ConfigSetting from './components/config_setting';
 import PluginErrorBoundary from './components/error_boundary';
+import LangflowBotPost from './components/langflow_bot_post';
 import RHSPane from './components/rhs';
+import PostEventListener from './post_event_listener';
+import {buildPluginWebSocketEventName, handleStreamingPostUpdateEvent} from './streaming';
 import type {PluginRegistry} from './types/mattermost-webapp';
 
 const LangflowTitle = () => {
@@ -46,7 +49,15 @@ const SafeRHSPane = () => (
     </PluginErrorBoundary>
 );
 
+const SafeLangflowBotPost = (props: React.ComponentProps<typeof LangflowBotPost>) => (
+    <PluginErrorBoundary area={'Langflow 봇 포스트'}>
+        <LangflowBotPost {...props}/>
+    </PluginErrorBoundary>
+);
+
 export default class Plugin {
+    private readonly postEventListener = new PostEventListener();
+
     public async initialize(registry: PluginRegistry, store: Store<GlobalState>) {
         let siteURL = store.getState().entities.general.config.SiteURL;
         if (!siteURL) {
@@ -56,6 +67,24 @@ export default class Plugin {
 
         if (registry.registerAdminConsoleCustomSetting) {
             registry.registerAdminConsoleCustomSetting('Config', SafeConfigSetting);
+        }
+
+        registry.registerWebSocketEventHandler(
+            buildPluginWebSocketEventName(manifest.id, 'postupdate'),
+            (msg) => {
+                handleStreamingPostUpdateEvent(store, msg);
+                this.postEventListener.handlePostUpdateWebsockets(msg as any);
+            },
+        );
+
+        if (registry.registerPostTypeComponent) {
+            registry.registerPostTypeComponent('custom_langflow_bot', (props: any) => (
+                <SafeLangflowBotPost
+                    {...props}
+                    websocketRegister={this.postEventListener.registerPostUpdateListener}
+                    websocketUnregister={this.postEventListener.unregisterPostUpdateListener}
+                />
+            ));
         }
 
         if (registry.registerRightHandSidebarComponent) {
