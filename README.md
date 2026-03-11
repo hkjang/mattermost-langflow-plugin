@@ -5,7 +5,7 @@ Mattermost channels, threads, and DMs can trigger Langflow flows through dedicat
 ## MVP scope
 
 - Langflow single-endpoint integration
-- System Console configuration for the Langflow server, auth token, allowlist, limits, and bot catalog
+- System Console configuration for the Langflow server, auth token, allowlist, limits, and a visual multi-bot catalog editor
 - Multiple Mattermost bot accounts, each bound to one Langflow flow
 - Bot mention and DM trigger through `@bot-username`
 - Right-hand sidebar runner that lets users choose a configured bot

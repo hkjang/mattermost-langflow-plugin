@@ -1,7 +1,7 @@
 {
     "id": "com.mattermost.langflow",
     "name": "Langflow",
-    "version": "0.1.0-dev",
+    "version": "0.1.1-dev",
     "description": "Run Langflow flows through dedicated Mattermost bots mapped one-to-one to Langflow flows.",
     "homepage_url": "https://github.com/mattermost-community/mattermost-langflow-plugin",
     "support_url": "https://github.com/mattermost-community/mattermost-langflow-plugin/issues",
