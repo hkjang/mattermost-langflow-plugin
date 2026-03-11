@@ -4,9 +4,12 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -23,6 +26,10 @@ type langflowConnectionStatus struct {
 	URL        string `json:"url"`
 	StatusCode int    `json:"status_code"`
 	Message    string `json:"message"`
+	ErrorCode  string `json:"error_code,omitempty"`
+	Detail     string `json:"detail,omitempty"`
+	Hint       string `json:"hint,omitempty"`
+	Retryable  bool   `json:"retryable"`
 }
 
 type langflowStreamEvent struct {
@@ -30,8 +37,58 @@ type langflowStreamEvent struct {
 	Data  any    `json:"data"`
 }
 
-type langflowStreamParser struct {
-	pendingEvent string
+type langflowStreamParser struct{}
+
+type langflowCallError struct {
+	Code       string
+	Summary    string
+	Detail     string
+	Hint       string
+	RequestURL string
+	StatusCode int
+	Retryable  bool
+}
+
+func (e *langflowCallError) Error() string {
+	if e == nil {
+		return ""
+	}
+
+	lines := []string{}
+	if e.Summary != "" {
+		lines = append(lines, e.Summary)
+	}
+	if e.Detail != "" {
+		lines = append(lines, "상세: "+e.Detail)
+	}
+	if e.Hint != "" {
+		lines = append(lines, "조치: "+e.Hint)
+	}
+	if e.StatusCode > 0 {
+		lines = append(lines, fmt.Sprintf("HTTP 상태: %d", e.StatusCode))
+	}
+	if e.RequestURL != "" {
+		lines = append(lines, "요청 URL: "+e.RequestURL)
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func (e *langflowCallError) toConnectionStatus() *langflowConnectionStatus {
+	if e == nil {
+		return &langflowConnectionStatus{}
+	}
+
+	return &langflowConnectionStatus{
+		OK:         false,
+		URL:        e.RequestURL,
+		StatusCode: e.StatusCode,
+		Message:    e.Summary,
+		ErrorCode:  e.Code,
+		Detail:     e.Detail,
+		Hint:       e.Hint,
+		Retryable:  e.Retryable,
+	}
 }
 
 func (p *Plugin) invokeLangflow(ctx context.Context, cfg *runtimeConfiguration, bot BotDefinition, prompt, sessionID, correlationID string) (string, int, error) {
@@ -43,17 +100,28 @@ func (p *Plugin) invokeLangflow(ctx context.Context, cfg *runtimeConfiguration, 
 	client := &http.Client{Timeout: cfg.DefaultTimeout}
 	response, err := client.Do(request)
 	if err != nil {
-		return "", 0, fmt.Errorf("failed to contact Langflow: %w", err)
+		return "", 0, classifyLangflowRequestError(request.URL.String(), err)
 	}
 	defer response.Body.Close()
 
 	responseBody, err := io.ReadAll(io.LimitReader(response.Body, int64(cfg.MaxOutputLength*4)))
 	if err != nil {
-		return "", response.StatusCode, fmt.Errorf("failed to read Langflow response: %w", err)
+		return "", response.StatusCode, newLangflowCallError(
+			"response_read_failed",
+			"Langflow 응답 본문을 읽는 중 오류가 발생했습니다.",
+			err.Error(),
+			"Langflow 서버 로그와 프록시 설정을 확인한 뒤 다시 시도하세요.",
+			request.URL.String(),
+			response.StatusCode,
+			true,
+		)
 	}
 
 	if response.StatusCode >= http.StatusBadRequest {
-		return "", response.StatusCode, fmt.Errorf("Langflow returned %d: %s", response.StatusCode, summarizeErrorBody(responseBody))
+		return "", response.StatusCode, classifyLangflowHTTPError(request.URL.String(), response.StatusCode, response.Header, responseBody)
+	}
+	if looksLikeHTMLResponse(response.Header.Get("Content-Type"), responseBody) {
+		return "", response.StatusCode, newUnexpectedHTMLResponseError(request.URL.String())
 	}
 
 	output := extractLangflowText(responseBody)
@@ -78,40 +146,65 @@ func (p *Plugin) invokeLangflowStream(
 	client := &http.Client{Timeout: cfg.DefaultTimeout}
 	response, err := client.Do(request)
 	if err != nil {
-		return "", 0, fmt.Errorf("failed to contact Langflow: %w", err)
+		return "", 0, classifyLangflowRequestError(request.URL.String(), err)
 	}
 	defer response.Body.Close()
 
 	if response.StatusCode >= http.StatusBadRequest {
 		responseBody, readErr := io.ReadAll(io.LimitReader(response.Body, int64(cfg.MaxOutputLength*4)))
 		if readErr != nil {
-			return "", response.StatusCode, fmt.Errorf("Langflow returned %d and the error body could not be read: %w", response.StatusCode, readErr)
+			return "", response.StatusCode, newLangflowCallError(
+				"response_read_failed",
+				"Langflow 오류 응답 본문을 읽는 중 문제가 발생했습니다.",
+				readErr.Error(),
+				"프록시 또는 Langflow 서버 로그를 확인하세요.",
+				request.URL.String(),
+				response.StatusCode,
+				true,
+			)
 		}
-		return "", response.StatusCode, fmt.Errorf("Langflow returned %d: %s", response.StatusCode, summarizeErrorBody(responseBody))
+		return "", response.StatusCode, classifyLangflowHTTPError(request.URL.String(), response.StatusCode, response.Header, responseBody)
+	}
+
+	reader := bufio.NewReader(response.Body)
+	if responseBody, isHTML, detectErr := detectUnexpectedHTMLResponse(reader, response.Header.Get("Content-Type"), cfg.MaxOutputLength*4); detectErr != nil {
+		return "", response.StatusCode, newLangflowCallError(
+			"stream_inspect_failed",
+			"Langflow 스트리밍 응답 형식을 확인하는 중 오류가 발생했습니다.",
+			detectErr.Error(),
+			"Langflow 서버와 프록시가 SSE 응답을 그대로 전달하는지 확인하세요.",
+			request.URL.String(),
+			response.StatusCode,
+			true,
+		)
+	} else if isHTML {
+		if cfg.EnableDebugLogs {
+			p.API.LogDebug("Langflow streaming endpoint returned HTML instead of SSE", "body_preview", truncateString(strings.TrimSpace(string(responseBody)), 240), "correlation_id", correlationID)
+		}
+		return "", response.StatusCode, newUnexpectedHTMLResponseError(request.URL.String())
 	}
 
 	parser := langflowStreamParser{}
-	scanner := bufio.NewScanner(response.Body)
-	scanner.Buffer(make([]byte, 0, 32*1024), maxInt(cfg.MaxOutputLength*8, 512*1024))
 
 	var fallback bytes.Buffer
 	var streamOutput strings.Builder
 	finalOutput := ""
 
-	for scanner.Scan() {
-		line := scanner.Text()
-		trimmed := strings.TrimSpace(line)
+	for {
+		event, rawEvent, parseErr := parser.readEvent(reader)
+		if parseErr != nil {
+			if errors.Is(parseErr, io.EOF) {
+				break
+			}
+			if cfg.EnableDebugLogs {
+				p.API.LogDebug("Ignoring Langflow stream event that could not be parsed", "error", parseErr, "correlation_id", correlationID)
+			}
+			continue
+		}
+		trimmed := strings.TrimSpace(rawEvent)
 		if trimmed != "" {
 			fallback.WriteString(trimmed)
 			fallback.WriteByte('\n')
-		}
-
-		event, parseErr := parser.parseLine(line)
-		if parseErr != nil {
-			if cfg.EnableDebugLogs {
-				p.API.LogDebug("Ignoring Langflow stream line that could not be parsed", "error", parseErr, "correlation_id", correlationID)
-			}
-			continue
 		}
 		if event == nil {
 			continue
@@ -132,7 +225,15 @@ func (p *Plugin) invokeLangflowStream(
 			if message == "" {
 				message = "Langflow streaming request failed"
 			}
-			return "", response.StatusCode, fmt.Errorf("%s", message)
+			return "", response.StatusCode, newLangflowCallError(
+				"stream_error_event",
+				"Langflow가 스트리밍 중 오류 이벤트를 반환했습니다.",
+				message,
+				"Flow 내부 노드 오류나 입력 스키마를 확인하세요.",
+				request.URL.String(),
+				response.StatusCode,
+				false,
+			)
 		case "end":
 			if candidate := extractLangflowTextFromValue(event.Data); candidate != "" {
 				finalOutput = candidate
@@ -144,10 +245,6 @@ func (p *Plugin) invokeLangflowStream(
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
-		return "", response.StatusCode, fmt.Errorf("failed to read Langflow stream: %w", err)
-	}
-
 	output := strings.TrimSpace(finalOutput)
 	if output == "" {
 		output = strings.TrimSpace(streamOutput.String())
@@ -157,7 +254,15 @@ func (p *Plugin) invokeLangflowStream(
 	}
 	output = truncateString(output, cfg.MaxOutputLength)
 	if output == "" {
-		return "", response.StatusCode, fmt.Errorf("Langflow streaming response did not contain any text")
+		return "", response.StatusCode, newLangflowCallError(
+			"empty_stream_response",
+			"Langflow 스트리밍 응답에 표시할 텍스트가 없었습니다.",
+			"응답 이벤트는 도착했지만 텍스트 필드를 찾지 못했습니다.",
+			"Flow 출력 노드가 실제 텍스트를 반환하는지 확인하세요.",
+			request.URL.String(),
+			response.StatusCode,
+			false,
+		)
 	}
 
 	if onUpdate != nil {
@@ -213,10 +318,7 @@ func (p *Plugin) newLangflowRunRequest(
 }
 
 func buildLangflowRunURL(baseURL *url.URL, flowID string, stream bool) (*url.URL, error) {
-	endpointURL, err := baseURL.Parse("/api/v1/run/" + url.PathEscape(flowID))
-	if err != nil {
-		return nil, fmt.Errorf("failed to build Langflow endpoint: %w", err)
-	}
+	endpointURL := buildURLWithPathSegments(baseURL, append(langflowAPIPathSegments(baseURL), "run", flowID)...)
 	if stream {
 		query := endpointURL.Query()
 		query.Set("stream", "true")
@@ -227,24 +329,22 @@ func buildLangflowRunURL(baseURL *url.URL, flowID string, stream bool) (*url.URL
 
 func (p *Plugin) testLangflowConnection(ctx context.Context, cfg *runtimeConfiguration) (*langflowConnectionStatus, error) {
 	if cfg.ParsedBaseURL == nil {
-		return &langflowConnectionStatus{OK: false, Message: "Langflow base URL is not configured"}, nil
+		return &langflowConnectionStatus{OK: false, Message: "Langflow 기본 URL이 설정되지 않았습니다."}, nil
 	}
 	if !hostAllowed(cfg.ParsedBaseURL.Hostname(), cfg.AllowHosts) {
 		return &langflowConnectionStatus{
 			OK:      false,
 			URL:     cfg.ParsedBaseURL.String(),
-			Message: fmt.Sprintf("host %q is not allowlisted", cfg.ParsedBaseURL.Hostname()),
+			Message: "허용 호스트 정책에 의해 Langflow 호출이 차단되었습니다.",
+			Detail:  fmt.Sprintf("현재 호스트 %q 가 allowlist에 없습니다.", cfg.ParsedBaseURL.Hostname()),
+			Hint:    "System Console에서 허용 호스트를 추가하거나 기본 URL을 확인하세요.",
 		}, nil
 	}
 
-	candidates := []string{"/health", "/api/v1/health"}
+	candidates := buildLangflowHealthURLs(cfg.ParsedBaseURL)
 	client := &http.Client{Timeout: minDuration(cfg.DefaultTimeout, 10*time.Second)}
-	for _, candidate := range candidates {
-		target, err := cfg.ParsedBaseURL.Parse(candidate)
-		if err != nil {
-			return nil, fmt.Errorf("failed to build health URL: %w", err)
-		}
-
+	var lastStatus *langflowConnectionStatus
+	for _, target := range candidates {
 		request, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create health request: %w", err)
@@ -253,28 +353,44 @@ func (p *Plugin) testLangflowConnection(ctx context.Context, cfg *runtimeConfigu
 
 		response, err := client.Do(request)
 		if err != nil {
+			lastStatus = classifyLangflowRequestError(target.String(), err).toConnectionStatus()
 			continue
 		}
 
 		body, _ := io.ReadAll(io.LimitReader(response.Body, 2048))
 		response.Body.Close()
 
+		if response.StatusCode >= http.StatusBadRequest {
+			lastStatus = classifyLangflowHTTPError(target.String(), response.StatusCode, response.Header, body).toConnectionStatus()
+			continue
+		}
+		if looksLikeHTMLResponse(response.Header.Get("Content-Type"), body) {
+			lastStatus = newUnexpectedHTMLResponseError(target.String()).toConnectionStatus()
+			continue
+		}
+
 		status := &langflowConnectionStatus{
-			OK:         response.StatusCode < http.StatusBadRequest,
+			OK:         true,
 			URL:        target.String(),
 			StatusCode: response.StatusCode,
 			Message:    strings.TrimSpace(string(body)),
 		}
-		if status.OK && status.Message == "" {
-			status.Message = "Connection succeeded"
+		if status.Message == "" {
+			status.Message = "연결에 성공했습니다."
+			return status, nil
 		}
 		return status, nil
 	}
+	if lastStatus != nil {
+		return lastStatus, nil
+	}
 
 	return &langflowConnectionStatus{
-		OK:      false,
-		URL:     cfg.ParsedBaseURL.String(),
-		Message: "Unable to reach Langflow health endpoints",
+		OK:        false,
+		URL:       cfg.ParsedBaseURL.String(),
+		Message:   "Langflow 상태 확인 엔드포인트에 연결하지 못했습니다.",
+		Hint:      "기본 URL과 방화벽, 프록시, Langflow 프로세스 상태를 확인하세요.",
+		Retryable: true,
 	}, nil
 }
 
@@ -392,59 +508,121 @@ func isLikelyTextKey(key string) bool {
 		strings.Contains(key, "chunk")
 }
 
-func (p *langflowStreamParser) parseLine(line string) (*langflowStreamEvent, error) {
-	line = strings.TrimSpace(line)
-	if line == "" {
-		p.pendingEvent = ""
+func (p *langflowStreamParser) readEvent(reader *bufio.Reader) (*langflowStreamEvent, string, error) {
+	if reader == nil {
+		return nil, "", io.EOF
+	}
+
+	var eventName string
+	dataLines := make([]string, 0, 4)
+	rawLines := make([]string, 0, 4)
+
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
+			return nil, "", err
+		}
+
+		line = strings.TrimSuffix(line, "\n")
+		line = strings.TrimSuffix(line, "\r")
+		trimmedLine := strings.TrimSpace(line)
+		if trimmedLine != "" {
+			rawLines = append(rawLines, trimmedLine)
+		}
+
+		if trimmedLine == "" {
+			event, parseErr := p.parsePayload(strings.Join(dataLines, "\n"), eventName)
+			if parseErr != nil {
+				return nil, strings.Join(rawLines, "\n"), parseErr
+			}
+			if event != nil {
+				return event, strings.Join(rawLines, "\n"), nil
+			}
+			if errors.Is(err, io.EOF) {
+				return nil, "", io.EOF
+			}
+			continue
+		}
+
+		if strings.HasPrefix(trimmedLine, ":") {
+			if errors.Is(err, io.EOF) {
+				event, parseErr := p.parsePayload(strings.Join(dataLines, "\n"), eventName)
+				if parseErr != nil {
+					return nil, strings.Join(rawLines, "\n"), parseErr
+				}
+				if event != nil {
+					return event, strings.Join(rawLines, "\n"), nil
+				}
+				return nil, "", io.EOF
+			}
+			continue
+		}
+
+		field, value, hasColon := strings.Cut(line, ":")
+		if hasColon {
+			value = strings.TrimPrefix(value, " ")
+		}
+
+		switch {
+		case hasColon && field == "event":
+			eventName = strings.TrimSpace(value)
+		case hasColon && field == "data":
+			dataLines = append(dataLines, value)
+		case strings.HasPrefix(trimmedLine, "{") || strings.HasPrefix(trimmedLine, "["):
+			dataLines = append(dataLines, trimmedLine)
+		default:
+			dataLines = append(dataLines, line)
+		}
+
+		if errors.Is(err, io.EOF) {
+			event, parseErr := p.parsePayload(strings.Join(dataLines, "\n"), eventName)
+			if parseErr != nil {
+				return nil, strings.Join(rawLines, "\n"), parseErr
+			}
+			if event != nil {
+				return event, strings.Join(rawLines, "\n"), nil
+			}
+			return nil, "", io.EOF
+		}
+	}
+}
+
+func (p *langflowStreamParser) parsePayload(payload, eventName string) (*langflowStreamEvent, error) {
+	payload = strings.TrimSpace(payload)
+	eventName = strings.TrimSpace(eventName)
+	if payload == "" {
 		return nil, nil
 	}
-	if strings.HasPrefix(line, ":") {
-		return nil, nil
-	}
-	if strings.HasPrefix(line, "event:") {
-		p.pendingEvent = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
-		return nil, nil
-	}
-	if strings.HasPrefix(line, "data:") {
-		line = strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-	}
-	if line == "" {
-		return nil, nil
-	}
-	if line == "[DONE]" {
+	if payload == "[DONE]" {
 		return &langflowStreamEvent{Event: "end", Data: map[string]any{}}, nil
 	}
 
 	var event langflowStreamEvent
-	if err := json.Unmarshal([]byte(line), &event); err == nil && (event.Event != "" || event.Data != nil) {
-		if event.Event == "" && p.pendingEvent != "" {
-			event.Event = p.pendingEvent
+	if err := json.Unmarshal([]byte(payload), &event); err == nil && (event.Event != "" || event.Data != nil) {
+		if event.Event == "" {
+			event.Event = defaultIfEmpty(eventName, "message")
 		}
 		return &event, nil
 	}
 
-	var payload any
-	if err := json.Unmarshal([]byte(line), &payload); err == nil {
-		eventName := "end"
-		if p.pendingEvent != "" {
-			eventName = p.pendingEvent
-		}
+	var decoded any
+	if err := json.Unmarshal([]byte(payload), &decoded); err == nil {
 		return &langflowStreamEvent{
-			Event: eventName,
-			Data:  payload,
+			Event: defaultIfEmpty(eventName, "end"),
+			Data:  decoded,
 		}, nil
 	}
 
-	if p.pendingEvent != "" {
+	if eventName != "" {
 		return &langflowStreamEvent{
-			Event: p.pendingEvent,
-			Data:  map[string]any{"chunk": line},
+			Event: eventName,
+			Data:  map[string]any{"chunk": payload},
 		}, nil
 	}
 
 	return &langflowStreamEvent{
 		Event: "message",
-		Data:  map[string]any{"text": line},
+		Data:  map[string]any{"text": payload},
 	}, nil
 }
 
@@ -532,4 +710,424 @@ func stringifyValue(value any) string {
 	default:
 		return strings.TrimSpace(fmt.Sprint(typed))
 	}
+}
+
+func detectUnexpectedHTMLResponse(reader *bufio.Reader, contentType string, limit int) ([]byte, bool, error) {
+	if reader == nil {
+		return nil, false, nil
+	}
+	inspectionLimit := maxInt(limit, 2048)
+	if looksLikeHTMLContentType(contentType) {
+		body, err := io.ReadAll(io.LimitReader(reader, int64(inspectionLimit)))
+		return body, true, err
+	}
+
+	preview, err := reader.Peek(minInt(inspectionLimit, 2048))
+	if err != nil && err != io.EOF && err != bufio.ErrBufferFull {
+		return nil, false, err
+	}
+	if looksLikeHTMLResponse(contentType, preview) {
+		body, readErr := io.ReadAll(io.LimitReader(reader, int64(inspectionLimit)))
+		return body, true, readErr
+	}
+
+	return nil, false, nil
+}
+
+func buildLangflowHealthURLs(baseURL *url.URL) []*url.URL {
+	serviceSegments := langflowServicePathSegments(baseURL)
+	apiSegments := langflowAPIPathSegments(baseURL)
+	candidates := [][]string{
+		append(append([]string{}, apiSegments...), "health"),
+	}
+	if !equalStringSlices(serviceSegments, apiSegments) {
+		candidates = append(candidates, append(append([]string{}, serviceSegments...), "health"))
+	}
+
+	urls := make([]*url.URL, 0, len(candidates))
+	seen := map[string]struct{}{}
+	for _, segments := range candidates {
+		target := buildURLWithPathSegments(baseURL, segments...)
+		key := target.String()
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		urls = append(urls, target)
+	}
+	return urls
+}
+
+func langflowAPIPathSegments(baseURL *url.URL) []string {
+	segments := append([]string{}, langflowServicePathSegments(baseURL)...)
+	segments = append(segments, "api", "v1")
+	return segments
+}
+
+func langflowServicePathSegments(baseURL *url.URL) []string {
+	segments := normalizeLangflowBasePathSegments(baseURL)
+	count := len(segments)
+	switch {
+	case count >= 2 && strings.EqualFold(segments[count-2], "api") && strings.EqualFold(segments[count-1], "v1"):
+		return append([]string{}, segments[:count-2]...)
+	case count >= 1 && strings.EqualFold(segments[count-1], "api"):
+		return append([]string{}, segments[:count-1]...)
+	default:
+		return append([]string{}, segments...)
+	}
+}
+
+func normalizeLangflowBasePathSegments(baseURL *url.URL) []string {
+	if baseURL == nil {
+		return nil
+	}
+	segments := splitURLPathSegments(baseURL.Path)
+	count := len(segments)
+	switch {
+	case count >= 4 &&
+		strings.EqualFold(segments[count-4], "api") &&
+		strings.EqualFold(segments[count-3], "v1") &&
+		strings.EqualFold(segments[count-2], "run"):
+		return append([]string{}, segments[:count-2]...)
+	case count >= 3 &&
+		strings.EqualFold(segments[count-3], "api") &&
+		strings.EqualFold(segments[count-2], "v1") &&
+		strings.EqualFold(segments[count-1], "health"):
+		return append([]string{}, segments[:count-1]...)
+	case count >= 2 &&
+		strings.EqualFold(segments[count-2], "api") &&
+		strings.EqualFold(segments[count-1], "health"):
+		return append([]string{}, segments[:count-1]...)
+	default:
+		return segments
+	}
+}
+
+func splitURLPathSegments(path string) []string {
+	trimmed := strings.Trim(path, "/")
+	if trimmed == "" {
+		return nil
+	}
+
+	parts := strings.Split(trimmed, "/")
+	segments := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		segments = append(segments, part)
+	}
+	return segments
+}
+
+func buildURLWithPathSegments(baseURL *url.URL, segments ...string) *url.URL {
+	target := *baseURL
+	target.RawQuery = ""
+	target.Fragment = ""
+	target.Path = joinPathSegments(false, segments...)
+	target.RawPath = joinPathSegments(true, segments...)
+	return &target
+}
+
+func joinPathSegments(escape bool, segments ...string) string {
+	filtered := make([]string, 0, len(segments))
+	for _, segment := range segments {
+		segment = strings.Trim(segment, "/")
+		if segment == "" {
+			continue
+		}
+		if escape {
+			filtered = append(filtered, url.PathEscape(segment))
+			continue
+		}
+		filtered = append(filtered, segment)
+	}
+	if len(filtered) == 0 {
+		return "/"
+	}
+	return "/" + strings.Join(filtered, "/")
+}
+
+func looksLikeHTMLResponse(contentType string, body []byte) bool {
+	if looksLikeHTMLContentType(contentType) {
+		return true
+	}
+	sample := strings.ToLower(strings.TrimSpace(string(body)))
+	if sample == "" {
+		return false
+	}
+	if strings.HasPrefix(sample, "<!doctype html") || strings.HasPrefix(sample, "<html") {
+		return true
+	}
+	return strings.Contains(sample, "enable javascript to run this app") ||
+		(strings.Contains(sample, "<body") && strings.Contains(sample, "</html>"))
+}
+
+func looksLikeHTMLContentType(contentType string) bool {
+	contentType = strings.ToLower(strings.TrimSpace(contentType))
+	return strings.Contains(contentType, "text/html") || strings.Contains(contentType, "application/xhtml+xml")
+}
+
+func unexpectedHTMLResponseMessage(targetURL string) string {
+	return fmt.Sprintf("Langflow API 대신 웹 화면 HTML이 반환되었습니다. 기본 URL, 역프록시 서브경로, 인증 설정을 확인하세요. 요청 URL: %s", targetURL)
+}
+
+func equalStringSlices(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func minInt(values ...int) int {
+	if len(values) == 0 {
+		return 0
+	}
+	minimum := values[0]
+	for _, value := range values[1:] {
+		if value < minimum {
+			minimum = value
+		}
+	}
+	return minimum
+}
+
+func newLangflowCallError(code, summary, detail, hint, requestURL string, statusCode int, retryable bool) *langflowCallError {
+	return &langflowCallError{
+		Code:       code,
+		Summary:    strings.TrimSpace(summary),
+		Detail:     strings.TrimSpace(detail),
+		Hint:       strings.TrimSpace(hint),
+		RequestURL: strings.TrimSpace(requestURL),
+		StatusCode: statusCode,
+		Retryable:  retryable,
+	}
+}
+
+func newUnexpectedHTMLResponseError(requestURL string) *langflowCallError {
+	return newLangflowCallError(
+		"unexpected_html",
+		"Langflow API 대신 웹 화면 HTML이 반환되었습니다.",
+		"플러그인이 API JSON/SSE 대신 웹앱 HTML 문서를 받았습니다.",
+		"기본 URL에 Langflow 서비스 경로를 정확히 입력하고, 역프록시가 API 요청을 로그인 화면이나 SPA index.html로 돌려보내지 않는지 확인하세요.",
+		requestURL,
+		http.StatusOK,
+		false,
+	)
+}
+
+func classifyLangflowHTTPError(requestURL string, statusCode int, headers http.Header, body []byte) *langflowCallError {
+	if looksLikeHTMLResponse(headers.Get("Content-Type"), body) {
+		return newUnexpectedHTMLResponseError(requestURL)
+	}
+
+	bodySummary := summarizeErrorBody(body)
+	requestID := firstHeaderValue(headers, "X-Request-Id", "X-Request-ID", "X-Correlation-ID")
+	if requestID != "" {
+		bodySummary = strings.TrimSpace(bodySummary + " (Langflow request id: " + requestID + ")")
+	}
+
+	switch statusCode {
+	case http.StatusBadRequest:
+		return newLangflowCallError(
+			"bad_request",
+			"Langflow가 요청을 거부했습니다.",
+			defaultIfEmpty(bodySummary, "입력값 또는 Flow 설정이 Langflow 요구사항과 맞지 않습니다."),
+			"Flow 입력 스키마, 필수 파라미터, 프롬프트 길이를 확인하세요.",
+			requestURL,
+			statusCode,
+			false,
+		)
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return newLangflowCallError(
+			"auth_failed",
+			"Langflow 인증에 실패했습니다.",
+			defaultIfEmpty(bodySummary, "Langflow가 토큰 또는 API 키를 허용하지 않았습니다."),
+			"System Console의 인증 모드와 토큰 값을 다시 확인하세요.",
+			requestURL,
+			statusCode,
+			false,
+		)
+	case http.StatusNotFound:
+		return newLangflowCallError(
+			"not_found",
+			"Langflow API 경로 또는 Flow를 찾지 못했습니다.",
+			defaultIfEmpty(bodySummary, "요청한 run endpoint 또는 flow_id가 존재하지 않습니다."),
+			"기본 URL의 서브경로와 bot에 연결된 flow_id를 다시 확인하세요.",
+			requestURL,
+			statusCode,
+			false,
+		)
+	case http.StatusTooManyRequests:
+		retryAfter := strings.TrimSpace(headers.Get("Retry-After"))
+		hint := "잠시 후 다시 시도하거나 Langflow 쪽 제한 정책을 확인하세요."
+		if retryAfter != "" {
+			hint = fmt.Sprintf("Langflow가 Retry-After=%s 를 반환했습니다. 잠시 후 다시 시도하세요.", retryAfter)
+		}
+		return newLangflowCallError(
+			"rate_limited",
+			"Langflow 호출 한도에 걸렸습니다.",
+			defaultIfEmpty(bodySummary, "Langflow가 너무 많은 요청을 받아 현재 호출을 제한했습니다."),
+			hint,
+			requestURL,
+			statusCode,
+			true,
+		)
+	case http.StatusGatewayTimeout, http.StatusRequestTimeout:
+		return newLangflowCallError(
+			"upstream_timeout",
+			"Langflow가 시간 내에 응답하지 않았습니다.",
+			defaultIfEmpty(bodySummary, "업스트림 타임아웃이 발생했습니다."),
+			"Flow 실행 시간이 길다면 타임아웃 값을 늘리거나 Langflow 서버 상태를 확인하세요.",
+			requestURL,
+			statusCode,
+			true,
+		)
+	default:
+		if statusCode >= http.StatusInternalServerError {
+			return newLangflowCallError(
+				"server_error",
+				"Langflow 서버 내부 오류가 발생했습니다.",
+				defaultIfEmpty(bodySummary, "Langflow 서버가 5xx 오류를 반환했습니다."),
+				"Langflow 서버 로그와 Flow 실행 상태를 확인한 뒤 다시 시도하세요.",
+				requestURL,
+				statusCode,
+				true,
+			)
+		}
+		return newLangflowCallError(
+			"unexpected_status",
+			fmt.Sprintf("Langflow가 예상하지 못한 HTTP 상태 %d 를 반환했습니다.", statusCode),
+			bodySummary,
+			"응답 본문과 Langflow 로그를 함께 확인하세요.",
+			requestURL,
+			statusCode,
+			statusCode >= 500,
+		)
+	}
+}
+
+func classifyLangflowRequestError(requestURL string, err error) *langflowCallError {
+	detail := strings.TrimSpace(err.Error())
+
+	var timeoutError interface{ Timeout() bool }
+	if errors.As(err, &timeoutError) && timeoutError.Timeout() {
+		return newLangflowCallError(
+			"network_timeout",
+			"Langflow 서버 연결이 시간 초과되었습니다.",
+			detail,
+			"Langflow 서버 상태와 네트워크 지연, 플러그인 타임아웃 설정을 확인하세요.",
+			requestURL,
+			0,
+			true,
+		)
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return newLangflowCallError(
+			"network_timeout",
+			"Langflow 서버 연결이 시간 초과되었습니다.",
+			detail,
+			"Langflow 서버 상태와 플러그인 타임아웃 값을 확인하세요.",
+			requestURL,
+			0,
+			true,
+		)
+	}
+
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return newLangflowCallError(
+			"dns_error",
+			"Langflow 호스트 이름을 찾지 못했습니다.",
+			detail,
+			"기본 URL의 도메인 이름과 DNS 설정을 확인하세요.",
+			requestURL,
+			0,
+			false,
+		)
+	}
+
+	var hostnameErr x509.HostnameError
+	if errors.As(err, &hostnameErr) {
+		return newLangflowCallError(
+			"tls_hostname_error",
+			"TLS 인증서의 호스트 이름이 Langflow URL과 일치하지 않습니다.",
+			detail,
+			"인증서의 SAN/CN과 기본 URL 호스트가 일치하는지 확인하세요.",
+			requestURL,
+			0,
+			false,
+		)
+	}
+
+	var unknownAuthorityErr x509.UnknownAuthorityError
+	if errors.As(err, &unknownAuthorityErr) {
+		return newLangflowCallError(
+			"tls_unknown_authority",
+			"Langflow TLS 인증서를 신뢰할 수 없습니다.",
+			detail,
+			"사설 인증서를 사용 중이면 Mattermost 서버가 해당 루트 인증서를 신뢰하도록 구성하세요.",
+			requestURL,
+			0,
+			false,
+		)
+	}
+
+	lower := strings.ToLower(detail)
+	switch {
+	case strings.Contains(lower, "connection refused"):
+		return newLangflowCallError(
+			"connection_refused",
+			"Langflow 서버가 연결을 거부했습니다.",
+			detail,
+			"Langflow 프로세스가 실행 중인지, 포트와 방화벽이 올바른지 확인하세요.",
+			requestURL,
+			0,
+			true,
+		)
+	case strings.Contains(lower, "no such host"):
+		return newLangflowCallError(
+			"dns_error",
+			"Langflow 호스트 이름을 찾지 못했습니다.",
+			detail,
+			"기본 URL의 도메인 이름과 DNS 설정을 확인하세요.",
+			requestURL,
+			0,
+			false,
+		)
+	case strings.Contains(lower, "certificate"), strings.Contains(lower, "tls"):
+		return newLangflowCallError(
+			"tls_error",
+			"Langflow TLS 연결을 설정하지 못했습니다.",
+			detail,
+			"HTTPS 인증서 체인과 프록시 TLS 구성을 확인하세요.",
+			requestURL,
+			0,
+			false,
+		)
+	default:
+		return newLangflowCallError(
+			"network_error",
+			"Langflow 서버에 연결하지 못했습니다.",
+			detail,
+			"기본 URL, 네트워크 경로, 방화벽, 프록시 설정을 확인하세요.",
+			requestURL,
+			0,
+			true,
+		)
+	}
+}
+
+func firstHeaderValue(headers http.Header, keys ...string) string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(headers.Get(key)); value != "" {
+			return value
+		}
+	}
+	return ""
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -35,6 +36,11 @@ type BotRunResult struct {
 	Status        string `json:"status"`
 	Output        string `json:"output,omitempty"`
 	ErrorMessage  string `json:"error_message,omitempty"`
+	ErrorCode     string `json:"error_code,omitempty"`
+	ErrorDetail   string `json:"error_detail,omitempty"`
+	ErrorHint     string `json:"error_hint,omitempty"`
+	RequestURL    string `json:"request_url,omitempty"`
+	HTTPStatus    int    `json:"http_status,omitempty"`
 	Retryable     bool   `json:"retryable"`
 }
 
@@ -127,14 +133,15 @@ func (p *Plugin) executeBotAndPost(ctx context.Context, request BotRunRequest) (
 	}
 	completedAt := time.Now()
 	if runErr != nil {
-		record := newExecutionRecord(request, account.Definition, correlationID, "failed", prompt, runErr.Error(), statusCode >= 500 || statusCode == 0, startedAt, completedAt)
+		failure := describeExecutionFailure(runErr, statusCode >= 500 || statusCode == 0)
+		record := newExecutionRecord(request, account.Definition, correlationID, "failed", prompt, failure.Message, failure.ErrorCode, failure.Retryable, startedAt, completedAt)
 		p.appendExecutionHistory(request.UserID, record)
-		p.logUsage(cfg, correlationID, request, account.Definition, "failed", runErr.Error())
+		p.logUsage(cfg, correlationID, request, account.Definition, "failed", failure.Message)
 		var postErr error
 		if streamUpdater != nil {
-			postErr = streamUpdater.fail(runErr.Error())
+			postErr = streamUpdater.fail(failure)
 		} else {
-			postErr = p.postFailure(channel, request.RootID, account, correlationID, runErr.Error())
+			postErr = p.postFailure(channel, request.RootID, account, correlationID, failure)
 		}
 		if postErr != nil {
 			p.API.LogError("Failed to post Langflow error response", "error", postErr, "correlation_id", correlationID)
@@ -146,8 +153,13 @@ func (p *Plugin) executeBotAndPost(ctx context.Context, request BotRunRequest) (
 			BotName:       account.Definition.DisplayName,
 			FlowID:        account.Definition.FlowID,
 			Status:        "failed",
-			ErrorMessage:  runErr.Error(),
-			Retryable:     statusCode >= 500 || statusCode == 0,
+			ErrorMessage:  failure.Message,
+			ErrorCode:     failure.ErrorCode,
+			ErrorDetail:   failure.Detail,
+			ErrorHint:     failure.Hint,
+			RequestURL:    failure.RequestURL,
+			HTTPStatus:    failure.HTTPStatus,
+			Retryable:     failure.Retryable,
 		}, runErr
 	}
 
@@ -158,12 +170,13 @@ func (p *Plugin) executeBotAndPost(ctx context.Context, request BotRunRequest) (
 		post, err = p.postSuccess(channel, request.RootID, account, correlationID, output)
 	}
 	if err != nil {
-		record := newExecutionRecord(request, account.Definition, correlationID, "failed", prompt, err.Error(), true, startedAt, time.Now())
+		failure := describeExecutionFailure(err, true)
+		record := newExecutionRecord(request, account.Definition, correlationID, "failed", prompt, failure.Message, failure.ErrorCode, failure.Retryable, startedAt, time.Now())
 		p.appendExecutionHistory(request.UserID, record)
 		return nil, err
 	}
 
-	record := newExecutionRecord(request, account.Definition, correlationID, "completed", prompt, "", false, startedAt, completedAt)
+	record := newExecutionRecord(request, account.Definition, correlationID, "completed", prompt, "", "", false, startedAt, completedAt)
 	p.appendExecutionHistory(request.UserID, record)
 	p.logUsage(cfg, correlationID, request, account.Definition, "completed", "")
 
@@ -470,7 +483,7 @@ func (p *Plugin) postSuccess(channel *model.Channel, rootID string, account botA
 	return post, nil
 }
 
-func (p *Plugin) postFailure(channel *model.Channel, rootID string, account botAccount, correlationID, message string) error {
+func (p *Plugin) postFailure(channel *model.Channel, rootID string, account botAccount, correlationID string, failure executionFailureView) error {
 	if err := p.ensureBotInChannel(channel.Id, account.UserID); err != nil {
 		return err
 	}
@@ -479,19 +492,14 @@ func (p *Plugin) postFailure(channel *model.Channel, rootID string, account botA
 		UserId:    account.UserID,
 		ChannelId: channel.Id,
 		RootId:    rootID,
-		Message: strings.TrimSpace(fmt.Sprintf(
-			"Langflow flow `%s` failed for `@%s`.\n\n%s\n\n_Correlation ID:_ `%s`",
-			account.Definition.FlowID,
-			account.Definition.Username,
-			message,
-			correlationID,
-		)),
+		Message:   buildBotFailureMessage(account.Definition, correlationID, failure),
 		Props: map[string]any{
-			"from_bot":         "true",
-			"langflow_bot_id":  account.Definition.ID,
-			"langflow_flow_id": account.Definition.FlowID,
-			"langflow_error":   "true",
-			"langflow_stream":  "false",
+			"from_bot":            "true",
+			"langflow_bot_id":     account.Definition.ID,
+			"langflow_flow_id":    account.Definition.FlowID,
+			"langflow_error":      "true",
+			"langflow_stream":     "false",
+			"langflow_error_code": failure.ErrorCode,
 		},
 	})
 	if appErr != nil {
@@ -605,34 +613,28 @@ func (u *streamingPostUpdater) update(content string, final bool) {
 	if !final && u.interval > 0 && !u.lastUpdateAt.IsZero() && time.Since(u.lastUpdateAt) < u.interval {
 		return
 	}
-	if _, err := u.render(content, final, ""); err != nil {
+	if _, err := u.render(content, final, executionFailureView{}); err != nil {
 		u.plugin.API.LogError("Failed to update Langflow streaming post", "error", err, "correlation_id", u.correlationID)
 	}
 }
 
 func (u *streamingPostUpdater) complete(content string) (*model.Post, error) {
-	return u.render(content, true, "")
+	return u.render(content, true, executionFailureView{})
 }
 
-func (u *streamingPostUpdater) fail(message string) error {
-	_, err := u.render("", false, message)
+func (u *streamingPostUpdater) fail(failure executionFailureView) error {
+	_, err := u.render("", false, failure)
 	return err
 }
 
-func (u *streamingPostUpdater) render(content string, completed bool, failure string) (*model.Post, error) {
+func (u *streamingPostUpdater) render(content string, completed bool, failure executionFailureView) (*model.Post, error) {
 	if u == nil || u.post == nil {
 		return nil, fmt.Errorf("streaming post is not initialized")
 	}
 
-	message := buildBotResponseMessage(u.account.Definition.DisplayName, content, u.correlationID, failure == "" && !completed)
-	if failure != "" {
-		message = strings.TrimSpace(fmt.Sprintf(
-			"Langflow flow `%s` failed for `@%s`.\n\n%s\n\n_Correlation ID:_ `%s`",
-			u.account.Definition.FlowID,
-			u.account.Definition.Username,
-			failure,
-			u.correlationID,
-		))
+	message := buildBotResponseMessage(u.account.Definition.DisplayName, content, u.correlationID, !failure.HasFailure && !completed)
+	if failure.HasFailure {
+		message = buildBotFailureMessage(u.account.Definition, u.correlationID, failure)
 	}
 	if message == u.lastRendered {
 		return u.post, nil
@@ -644,8 +646,9 @@ func (u *streamingPostUpdater) render(content string, completed bool, failure st
 	if updatedPost.Props == nil {
 		updatedPost.Props = map[string]any{}
 	}
-	if failure != "" {
+	if failure.HasFailure {
 		updatedPost.Props["langflow_error"] = "true"
+		updatedPost.Props["langflow_error_code"] = failure.ErrorCode
 		updatedPost.Props["langflow_stream_status"] = "failed"
 		updatedPost.Props["langflow_streaming"] = "false"
 	} else if completed {
@@ -686,6 +689,72 @@ func buildBotResponseMessage(displayName, output, correlationID string, streamin
 	}
 	parts = append(parts, "", fmt.Sprintf("_Correlation ID:_ `%s`", correlationID))
 	return strings.TrimSpace(strings.Join(parts, "\n"))
+}
+
+type executionFailureView struct {
+	HasFailure bool
+	Message    string
+	ErrorCode  string
+	Detail     string
+	Hint       string
+	RequestURL string
+	HTTPStatus int
+	Retryable  bool
+}
+
+func describeExecutionFailure(err error, defaultRetryable bool) executionFailureView {
+	if err == nil {
+		return executionFailureView{}
+	}
+
+	var callErr *langflowCallError
+	if errors.As(err, &callErr) {
+		return executionFailureView{
+			HasFailure: true,
+			Message:    callErr.Error(),
+			ErrorCode:  callErr.Code,
+			Detail:     callErr.Detail,
+			Hint:       callErr.Hint,
+			RequestURL: callErr.RequestURL,
+			HTTPStatus: callErr.StatusCode,
+			Retryable:  callErr.Retryable,
+		}
+	}
+
+	return executionFailureView{
+		HasFailure: true,
+		Message:    strings.TrimSpace(err.Error()),
+		Retryable:  defaultRetryable,
+	}
+}
+
+func buildBotFailureMessage(bot BotDefinition, correlationID string, failure executionFailureView) string {
+	lines := []string{
+		fmt.Sprintf("### %s", defaultIfEmpty(bot.DisplayName, "@"+bot.Username)),
+		"",
+		fmt.Sprintf("Langflow flow `%s` 호출에 실패했습니다.", bot.FlowID),
+	}
+
+	if failure.Message != "" {
+		lines = append(lines, "", failure.Message)
+	}
+	if failure.Detail != "" && !strings.Contains(failure.Message, "상세: "+failure.Detail) {
+		lines = append(lines, "", "상세: "+failure.Detail)
+	}
+	if failure.Hint != "" && !strings.Contains(failure.Message, "조치: "+failure.Hint) {
+		lines = append(lines, "", "조치: "+failure.Hint)
+	}
+	if failure.HTTPStatus > 0 && !strings.Contains(failure.Message, "HTTP 상태:") {
+		lines = append(lines, "", fmt.Sprintf("HTTP 상태: `%d`", failure.HTTPStatus))
+	}
+	if failure.RequestURL != "" && !strings.Contains(failure.Message, "요청 URL:") {
+		lines = append(lines, "", "요청 URL: "+failure.RequestURL)
+	}
+	if failure.Retryable {
+		lines = append(lines, "", "_재시도 가능:_ 예")
+	}
+	lines = append(lines, "", fmt.Sprintf("_Correlation ID:_ `%s`", correlationID))
+	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
 func buildLangflowSessionID(request BotRunRequest, bot BotDefinition) string {

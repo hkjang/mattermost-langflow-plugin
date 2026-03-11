@@ -37,6 +37,7 @@ export type ExecutionRecord = {
     flow_id: string;
     status: string;
     error_message?: string;
+    error_code?: string;
     source: string;
 };
 
@@ -50,6 +51,11 @@ export type BotRunResult = {
     status: string;
     output?: string;
     error_message?: string;
+    error_code?: string;
+    error_detail?: string;
+    error_hint?: string;
+    request_url?: string;
+    http_status?: number;
     retryable?: boolean;
 };
 
@@ -113,6 +119,10 @@ export type ConnectionStatus = {
     url: string;
     status_code: number;
     message: string;
+    error_code?: string;
+    detail?: string;
+    hint?: string;
+    retryable?: boolean;
 };
 
 export function setSiteURL(value: string) {

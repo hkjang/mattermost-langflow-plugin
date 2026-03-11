@@ -20,6 +20,7 @@ type ExecutionRecord struct {
 	Status        string `json:"status"`
 	PromptPreview string `json:"prompt_preview"`
 	ErrorMessage  string `json:"error_message,omitempty"`
+	ErrorCode     string `json:"error_code,omitempty"`
 	Retryable     bool   `json:"retryable"`
 	DurationMS    int64  `json:"duration_ms"`
 	StartedAt     int64  `json:"started_at"`
@@ -76,7 +77,7 @@ func (p *Plugin) getExecutionHistory(userID string, limit int) ([]ExecutionRecor
 	return history, nil
 }
 
-func newExecutionRecord(request BotRunRequest, bot BotDefinition, correlationID, status, prompt, errorMessage string, retryable bool, startedAt time.Time, completedAt time.Time) ExecutionRecord {
+func newExecutionRecord(request BotRunRequest, bot BotDefinition, correlationID, status, prompt, errorMessage, errorCode string, retryable bool, startedAt time.Time, completedAt time.Time) ExecutionRecord {
 	return ExecutionRecord{
 		CorrelationID: correlationID,
 		BotID:         bot.ID,
@@ -89,6 +90,7 @@ func newExecutionRecord(request BotRunRequest, bot BotDefinition, correlationID,
 		Status:        status,
 		PromptPreview: truncateString(prompt, 180),
 		ErrorMessage:  errorMessage,
+		ErrorCode:     errorCode,
 		Retryable:     retryable,
 		DurationMS:    completedAt.Sub(startedAt).Milliseconds(),
 		StartedAt:     startedAt.UnixMilli(),

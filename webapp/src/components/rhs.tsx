@@ -188,7 +188,11 @@ export default function RHSPane() {
                     <strong>{'Latest Result'}</strong>
                     <div>{`${lastResult.bot_name || lastResult.bot_username} - ${lastResult.status}`}</div>
                     <div>{`Flow: ${lastResult.flow_id}`}</div>
-                    {lastResult.error_message && <div>{lastResult.error_message}</div>}
+                    {lastResult.error_message && <div style={{whiteSpace: 'pre-wrap'}}>{lastResult.error_message}</div>}
+                    {lastResult.error_code && <div>{`Code: ${lastResult.error_code}`}</div>}
+                    {lastResult.error_hint && <div>{`Hint: ${lastResult.error_hint}`}</div>}
+                    {lastResult.request_url && <div style={{wordBreak: 'break-all'}}>{`URL: ${lastResult.request_url}`}</div>}
+                    {lastResult.retryable !== undefined && <div>{`Retryable: ${lastResult.retryable ? 'Yes' : 'No'}`}</div>}
                     {lastResult.correlation_id && <div>{`Correlation: ${lastResult.correlation_id}`}</div>}
                 </section>
             )}
@@ -205,7 +209,8 @@ export default function RHSPane() {
                             <strong>{item.bot_name || item.bot_username}</strong>
                             <div>{`@${item.bot_username} -> ${item.flow_id}`}</div>
                             <div>{`${item.status} via ${item.source}`}</div>
-                            {item.error_message && <div>{item.error_message}</div>}
+                            {item.error_message && <div style={{whiteSpace: 'pre-wrap'}}>{item.error_message}</div>}
+                            {item.error_code && <div>{`Code: ${item.error_code}`}</div>}
                         </div>
                     ))}
                 </div>

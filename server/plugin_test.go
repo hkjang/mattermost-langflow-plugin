@@ -1,6 +1,10 @@
 package main
 
 import (
+	"bufio"
+	"context"
+	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -99,7 +103,7 @@ func TestExtractLangflowText(t *testing.T) {
 func TestParseLangflowStreamJSONLine(t *testing.T) {
 	parser := langflowStreamParser{}
 
-	event, err := parser.parseLine(`{"event":"token","data":{"chunk":"Hello"}}`)
+	event, _, err := parser.readEvent(bufio.NewReader(strings.NewReader(`{"event":"token","data":{"chunk":"Hello"}}`)))
 	require.NoError(t, err)
 	require.NotNil(t, event)
 	require.Equal(t, "token", event.Event)
@@ -109,11 +113,7 @@ func TestParseLangflowStreamJSONLine(t *testing.T) {
 func TestParseLangflowStreamSSELine(t *testing.T) {
 	parser := langflowStreamParser{}
 
-	event, err := parser.parseLine(`event: token`)
-	require.NoError(t, err)
-	require.Nil(t, event)
-
-	event, err = parser.parseLine(`data: {"data":{"chunk":"World"}}`)
+	event, _, err := parser.readEvent(bufio.NewReader(strings.NewReader("event: token\ndata: {\"data\":{\"chunk\":\"World\"}}\n\n")))
 	require.NoError(t, err)
 	require.NotNil(t, event)
 	require.Equal(t, "token", event.Event)
@@ -123,9 +123,119 @@ func TestParseLangflowStreamSSELine(t *testing.T) {
 func TestParseLangflowStreamFallbackJSONPayload(t *testing.T) {
 	parser := langflowStreamParser{}
 
-	event, err := parser.parseLine(`{"outputs":[{"outputs":[{"results":{"message":{"text":"Hello from fallback"}}}]}]}`)
+	event, _, err := parser.readEvent(bufio.NewReader(strings.NewReader(`{"outputs":[{"outputs":[{"results":{"message":{"text":"Hello from fallback"}}}]}]}`)))
 	require.NoError(t, err)
 	require.NotNil(t, event)
 	require.Equal(t, "end", event.Event)
 	require.Equal(t, "Hello from fallback", extractLangflowTextFromValue(event.Data))
+}
+
+func TestParseLangflowStreamMultiLineData(t *testing.T) {
+	parser := langflowStreamParser{}
+
+	stream := "event: token\ndata: 첫 번째 줄\ndata: 두 번째 줄\n\n"
+	event, _, err := parser.readEvent(bufio.NewReader(strings.NewReader(stream)))
+	require.NoError(t, err)
+	require.NotNil(t, event)
+	require.Equal(t, "token", event.Event)
+	require.Equal(t, "첫 번째 줄\n두 번째 줄", extractLangflowStreamChunk(event.Data))
+}
+
+func TestParseLangflowStreamFlushesOnEOF(t *testing.T) {
+	parser := langflowStreamParser{}
+
+	stream := "event: token\ndata: {\"data\":{\"chunk\":\"EOF chunk\"}}"
+	event, _, err := parser.readEvent(bufio.NewReader(strings.NewReader(stream)))
+	require.NoError(t, err)
+	require.NotNil(t, event)
+	require.Equal(t, "token", event.Event)
+	require.Equal(t, "EOF chunk", extractLangflowStreamChunk(event.Data))
+}
+
+func TestBuildLangflowRunURLPreservesSubpath(t *testing.T) {
+	testCases := []struct {
+		name     string
+		baseURL  string
+		expected string
+	}{
+		{
+			name:     "instance root",
+			baseURL:  "https://langflow.example.com",
+			expected: "https://langflow.example.com/api/v1/run/support-assistant?stream=true",
+		},
+		{
+			name:     "mounted subpath",
+			baseURL:  "https://langflow.example.com/langflow",
+			expected: "https://langflow.example.com/langflow/api/v1/run/support-assistant?stream=true",
+		},
+		{
+			name:     "api root",
+			baseURL:  "https://langflow.example.com/langflow/api",
+			expected: "https://langflow.example.com/langflow/api/v1/run/support-assistant?stream=true",
+		},
+		{
+			name:     "api v1 root",
+			baseURL:  "https://langflow.example.com/langflow/api/v1",
+			expected: "https://langflow.example.com/langflow/api/v1/run/support-assistant?stream=true",
+		},
+		{
+			name:     "full run endpoint",
+			baseURL:  "https://langflow.example.com/langflow/api/v1/run/thread-summary",
+			expected: "https://langflow.example.com/langflow/api/v1/run/support-assistant?stream=true",
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			parsedURL, err := url.Parse(testCase.baseURL)
+			require.NoError(t, err)
+
+			endpointURL, err := buildLangflowRunURL(parsedURL, "support-assistant", true)
+			require.NoError(t, err)
+			require.Equal(t, testCase.expected, endpointURL.String())
+		})
+	}
+}
+
+func TestBuildLangflowHealthURLs(t *testing.T) {
+	parsedURL, err := url.Parse("https://langflow.example.com/langflow/api")
+	require.NoError(t, err)
+
+	targets := buildLangflowHealthURLs(parsedURL)
+	require.Len(t, targets, 2)
+	require.Equal(t, "https://langflow.example.com/langflow/api/v1/health", targets[0].String())
+	require.Equal(t, "https://langflow.example.com/langflow/health", targets[1].String())
+}
+
+func TestLooksLikeHTMLResponse(t *testing.T) {
+	body := []byte("<!doctype html><html><body><noscript>You need to enable JavaScript to run this app.</noscript></body></html>")
+
+	require.True(t, looksLikeHTMLResponse("text/html; charset=utf-8", body))
+	require.True(t, looksLikeHTMLResponse("", body))
+	require.False(t, looksLikeHTMLResponse("application/json", []byte(`{"result":"ok"}`)))
+}
+
+func TestClassifyLangflowHTTPErrorUnauthorized(t *testing.T) {
+	err := classifyLangflowHTTPError(
+		"https://langflow.example.com/api/v1/run/support",
+		401,
+		nil,
+		[]byte(`{"detail":"invalid token"}`),
+	)
+
+	require.Equal(t, "auth_failed", err.Code)
+	require.Equal(t, "Langflow 인증에 실패했습니다.", err.Summary)
+	require.Contains(t, err.Detail, "invalid token")
+	require.False(t, err.Retryable)
+}
+
+func TestClassifyLangflowRequestErrorTimeout(t *testing.T) {
+	err := classifyLangflowRequestError(
+		"https://langflow.example.com/api/v1/run/support",
+		context.DeadlineExceeded,
+	)
+
+	require.Equal(t, "network_timeout", err.Code)
+	require.True(t, err.Retryable)
+	require.Contains(t, err.Error(), "시간 초과")
 }

@@ -428,13 +428,18 @@ export default function ConfigSetting(props: CustomSettingProps) {
                     <>
                         <div style={gridTwoStyle}>
                             <LabeledField label={'Langflow 기본 URL'}>
-                                <input
-                                    disabled={disabled}
-                                    onChange={(event) => updateService({base_url: event.target.value})}
-                                    placeholder={'https://langflow.example.com'}
-                                    style={fieldStyle}
-                                    value={config.service.base_url}
-                                />
+                                <div style={{display: 'flex', flexDirection: 'column', gap: '8px'}}>
+                                    <input
+                                        disabled={disabled}
+                                        onChange={(event) => updateService({base_url: event.target.value})}
+                                        placeholder={'https://langflow.example.com 또는 https://gateway.example.com/langflow'}
+                                        style={fieldStyle}
+                                        value={config.service.base_url}
+                                    />
+                                    <span style={{fontSize: '12px', opacity: 0.8}}>
+                                        {'플러그인이 /api/v1/run/{flow_id}를 자동으로 붙입니다. 루트 URL, 서브경로 URL, /api 또는 /api/v1 URL 모두 입력할 수 있습니다.'}
+                                    </span>
+                                </div>
                             </LabeledField>
                             <LabeledField label={'인증 헤더 방식'}>
                                 <select
@@ -956,7 +961,11 @@ export default function ConfigSetting(props: CustomSettingProps) {
                             <div style={infoBoxStyle}>
                                 <strong>{connection.ok ? '연결에 성공했습니다.' : '연결에 실패했습니다.'}</strong>
                                 <span>{connection.url}</span>
-                                <span>{connection.message || '응답 메시지가 없습니다.'}</span>
+                                <span style={{whiteSpace: 'pre-wrap'}}>{connection.message || '응답 메시지가 없습니다.'}</span>
+                                {connection.error_code && <span>{`오류 코드: ${connection.error_code}`}</span>}
+                                {connection.detail && <span style={{whiteSpace: 'pre-wrap'}}>{`상세: ${connection.detail}`}</span>}
+                                {connection.hint && <span style={{whiteSpace: 'pre-wrap'}}>{`조치: ${connection.hint}`}</span>}
+                                {connection.retryable !== undefined && <span>{`재시도 가능: ${connection.retryable ? '예' : '아니오'}`}</span>}
                             </div>
                         )}
                     </>

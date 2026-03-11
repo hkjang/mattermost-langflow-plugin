@@ -109,7 +109,11 @@ export default function StatusPanel() {
                         <div>
                             <div>{connection.ok ? '연결에 성공했습니다.' : '연결에 실패했습니다.'}</div>
                             <div>{connection.url}</div>
-                            <div>{connection.message}</div>
+                            <div style={{whiteSpace: 'pre-wrap'}}>{connection.message}</div>
+                            {connection.error_code && <div>{`오류 코드: ${connection.error_code}`}</div>}
+                            {connection.detail && <div style={{whiteSpace: 'pre-wrap'}}>{`상세: ${connection.detail}`}</div>}
+                            {connection.hint && <div style={{whiteSpace: 'pre-wrap'}}>{`조치: ${connection.hint}`}</div>}
+                            {connection.retryable !== undefined && <div>{`재시도 가능: ${connection.retryable ? '예' : '아니오'}`}</div>}
                         </div>
                     )}
                 </>
