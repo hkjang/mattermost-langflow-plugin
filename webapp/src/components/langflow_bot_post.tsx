@@ -1,8 +1,10 @@
-import React, {useEffect, useMemo, useState} from 'react';
+import React, {useEffect, useMemo, useRef, useState} from 'react';
 
 import type {WebSocketMessage} from '@mattermost/client';
 
 import PostText from './post_text';
+
+import {isLangflowAwaitingFirstChunk} from '../streaming';
 
 type PostUpdateData = {
     post_id?: string;
@@ -12,8 +14,8 @@ type PostUpdateData = {
 
 type Props = {
     post: any;
-    websocketRegister: (postID: string, listener: (msg: WebSocketMessage<PostUpdateData>) => void) => void;
-    websocketUnregister: (postID: string, listener: (msg: WebSocketMessage<PostUpdateData>) => void) => void;
+    websocketRegister: (postID: string, listenerID: string, listener: (msg: WebSocketMessage<PostUpdateData>) => void) => void;
+    websocketUnregister: (postID: string, listenerID: string) => void;
 };
 
 const containerStyle: React.CSSProperties = {
@@ -29,38 +31,72 @@ const statusStyle: React.CSSProperties = {
     letterSpacing: '0.01em',
 };
 
+const precontentStyle: React.CSSProperties = {
+    alignItems: 'center',
+    color: 'rgba(var(--center-channel-color-rgb), 0.72)',
+    display: 'inline-flex',
+    fontSize: '13px',
+    gap: '8px',
+};
+
+const spinnerStyle: React.CSSProperties = {
+    animation: 'langflow-stream-cursor-blink 700ms linear infinite',
+    background: 'rgba(var(--center-channel-color-rgb), 0.16)',
+    borderRadius: '999px',
+    display: 'inline-block',
+    height: '10px',
+    width: '10px',
+};
+
 export default function LangflowBotPost(props: Props) {
-    const [message, setMessage] = useState(props.post.message || '');
+    const [message, setMessage] = useState(getRenderableMessage(props.post));
     const [generating, setGenerating] = useState(isStreamingPost(props.post));
+    const [precontent, setPrecontent] = useState(isLangflowAwaitingFirstChunk(props.post));
+    const listenerID = useRef(`langflow-${Math.random().toString(36).slice(2)}`);
 
     useEffect(() => {
-        setMessage(props.post.message || '');
+        setMessage(getRenderableMessage(props.post));
         setGenerating(isStreamingPost(props.post));
-    }, [props.post.message, props.post.props?.langflow_streaming, props.post.props?.langflow_stream_status]);
+        setPrecontent(isLangflowAwaitingFirstChunk(props.post));
+    }, [
+        props.post.message,
+        props.post.props?.langflow_streaming,
+        props.post.props?.langflow_stream_status,
+        props.post.props?.langflow_stream_placeholder,
+    ]);
 
     const listener = useMemo(() => {
         return (msg: WebSocketMessage<PostUpdateData>) => {
             const data = msg?.data || {};
+            if (data.post_id !== props.post.id) {
+                return;
+            }
+
             if (data.control === 'start') {
                 setGenerating(true);
+                setPrecontent(true);
+                setMessage('');
                 return;
             }
 
             if (typeof data.next === 'string' && data.next !== '') {
                 setGenerating(true);
+                setPrecontent(false);
                 setMessage(data.next);
+                return;
             }
 
-            if (data.control === 'end') {
+            if (data.control === 'end' || data.control === 'cancel') {
                 setGenerating(false);
+                setPrecontent(false);
             }
         };
-    }, []);
+    }, [props.post.id]);
 
     useEffect(() => {
-        props.websocketRegister(props.post.id, listener);
+        props.websocketRegister(props.post.id, listenerID.current, listener);
         return () => {
-            props.websocketUnregister(props.post.id, listener);
+            props.websocketUnregister(props.post.id, listenerID.current);
         };
     }, [listener, props.post.id, props.websocketRegister, props.websocketUnregister]);
 
@@ -69,13 +105,19 @@ export default function LangflowBotPost(props: Props) {
             data-testid='langflow-bot-post'
             style={containerStyle}
         >
+            {precontent && (
+                <span style={precontentStyle}>
+                    <span style={spinnerStyle}/>
+                    {'응답 생성 시작 중...'}
+                </span>
+            )}
             <PostText
                 channelID={props.post.channel_id}
                 message={message}
                 postID={props.post.id}
-                showCursor={generating}
+                showCursor={generating && !precontent}
             />
-            {generating && (
+            {generating && !precontent && (
                 <span style={statusStyle}>
                     {'응답 생성 중...'}
                 </span>
@@ -86,4 +128,12 @@ export default function LangflowBotPost(props: Props) {
 
 function isStreamingPost(post: any) {
     return post?.props?.langflow_streaming === 'true' || post?.props?.langflow_stream_status === 'streaming';
+}
+
+function getRenderableMessage(post: any) {
+    if (isLangflowAwaitingFirstChunk(post)) {
+        return '';
+    }
+
+    return post?.message || '';
 }

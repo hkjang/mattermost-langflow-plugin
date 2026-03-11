@@ -11,7 +11,7 @@ jest.mock('mattermost-redux/actions/posts', () => ({
     })),
 }), {virtual: true});
 
-import {buildPluginWebSocketEventName, buildStreamingPostUpdate} from './streaming';
+import {buildPluginWebSocketEventName, buildStreamingPostUpdate, isLangflowAwaitingFirstChunk} from './streaming';
 
 function makeState(post: Post) {
     return {
@@ -79,4 +79,16 @@ test('buildStreamingPostUpdate ignores non-streaming posts', () => {
     });
 
     expect(updatedPost).toBeNull();
+});
+
+test('isLangflowAwaitingFirstChunk detects placeholder streaming posts', () => {
+    const post = makePost({
+        props: {
+            langflow_stream: 'true',
+            langflow_streaming: 'true',
+            langflow_stream_placeholder: 'true',
+        },
+    });
+
+    expect(isLangflowAwaitingFirstChunk(post)).toBe(true);
 });

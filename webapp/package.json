@@ -60,6 +60,7 @@
   "dependencies": {
     "core-js": "3.26.0",
     "mattermost-redux": "11.1.0",
+    "mermaid": "10.9.1",
     "react": "18.2.0",
     "react-redux": "9.2.0",
     "redux": "5.0.1",

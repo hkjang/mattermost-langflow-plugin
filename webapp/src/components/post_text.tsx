@@ -1,13 +1,20 @@
-import React, {useEffect} from 'react';
+import React, {useEffect, useRef} from 'react';
 import {useSelector} from 'react-redux';
 
 import type {Channel} from '@mattermost/types/channels';
 import type {GlobalState} from '@mattermost/types/store';
 import type {Team} from '@mattermost/types/teams';
 
+import {cleanupMermaidArtifacts, containsCompleteMermaidFence, renderMermaidDiagrams} from '../mermaid_rendering';
+
 const cursorClassName = 'langflow-streaming-post-cursor';
+const markdownBodyClassName = 'langflow-markdown-body';
+const mattermostPostTextClassName = 'post-message__text';
 
 const containerStyle: React.CSSProperties = {
+    display: 'block',
+    maxWidth: '100%',
+    overflow: 'hidden',
     wordBreak: 'break-word',
 };
 
@@ -24,10 +31,38 @@ export default function PostText({message, channelID, postID, showCursor}: Props
     const channel = useSelector<GlobalState, Channel | undefined>((state) => state.entities.channels.channels[channelID]);
     const team = useSelector<GlobalState, Team | undefined>((state) => state.entities.teams.teams[channel?.team_id || '']);
     const siteURL = useSelector<GlobalState, string | undefined>((state) => state.entities.general.config.SiteURL);
+    const containerRef = useRef<HTMLDivElement | null>(null);
 
     useEffect(() => {
         ensureStreamingStyles();
     }, []);
+
+    useEffect(() => {
+        const cleanup = () => undefined;
+        const container = containerRef.current;
+        if (!container) {
+            return cleanup;
+        }
+
+        cleanupMermaidArtifacts(container);
+        if (!containsCompleteMermaidFence(message)) {
+            return () => {
+                cleanupMermaidArtifacts(container);
+            };
+        }
+
+        let cancelled = false;
+        renderMermaidDiagrams(container, postID, message).catch(() => {
+            if (!cancelled) {
+                cleanupMermaidArtifacts(container);
+            }
+        });
+
+        return () => {
+            cancelled = true;
+            cleanupMermaidArtifacts(container);
+        };
+    }, [message, postID]);
 
     const postUtils = (window as any).PostUtils as {
         formatText: (value: string, options: Record<string, unknown>) => string;
@@ -36,7 +71,12 @@ export default function PostText({message, channelID, postID, showCursor}: Props
 
     if (!postUtils) {
         return (
-            <div style={containerStyle}>
+            <div
+                className={buildContainerClassName(showCursor)}
+                data-testid='posttext'
+                ref={containerRef}
+                style={containerStyle}
+            >
                 {message}
                 {showCursor && <CursorFallback/>}
             </div>
@@ -63,7 +103,9 @@ export default function PostText({message, channelID, postID, showCursor}: Props
 
     return (
         <div
-            className={showCursor ? cursorClassName : undefined}
+            className={buildContainerClassName(showCursor)}
+            data-testid='posttext'
+            ref={containerRef}
             style={containerStyle}
         >
             {content || <p/>}
@@ -115,7 +157,8 @@ function ensureStreamingStyles() {
 .${cursorClassName} > h5:last-child::after,
 .${cursorClassName} > h6:last-child::after,
 .${cursorClassName} > blockquote:last-child > p::after,
-.${cursorClassName} > p:last-child::after {
+.${cursorClassName} > p:last-child::after,
+.${cursorClassName} > p:empty::after {
     content: '';
     width: 7px;
     height: 16px;
@@ -124,7 +167,68 @@ function ensureStreamingStyles() {
     margin-left: 3px;
     animation: langflow-stream-cursor-blink 500ms ease-in-out infinite;
 }
+
+.${markdownBodyClassName} table,
+.${markdownBodyClassName} .markdown__table {
+    border-collapse: collapse;
+    border-spacing: 0;
+    display: block;
+    margin: 12px 0;
+    max-width: 100%;
+    min-width: 100%;
+    overflow-x: auto;
+    width: max-content;
+}
+
+.${markdownBodyClassName} thead {
+    background: rgba(var(--center-channel-color-rgb), 0.04);
+}
+
+.${markdownBodyClassName} th,
+.${markdownBodyClassName} td {
+    border: 1px solid rgba(var(--center-channel-color-rgb), 0.16);
+    padding: 8px 12px;
+    vertical-align: top;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.${markdownBodyClassName} pre,
+.${markdownBodyClassName} .post-code {
+    max-width: 100%;
+    overflow-x: auto;
+}
+
+.${markdownBodyClassName} img {
+    height: auto;
+    max-width: 100%;
+}
+
+.${markdownBodyClassName} .langflow-mermaid-rendered {
+    background: rgba(var(--center-channel-color-rgb), 0.03);
+    border: 1px solid rgba(var(--center-channel-color-rgb), 0.12);
+    border-radius: 12px;
+    margin: 12px 0;
+    max-width: 100%;
+    overflow-x: auto;
+    padding: 12px;
+}
+
+.${markdownBodyClassName} .langflow-mermaid-rendered svg {
+    display: block;
+    height: auto;
+    margin: 0 auto;
+    max-width: 100%;
+}
 `;
     document.head.appendChild(style);
     streamingStylesInjected = true;
+}
+
+function buildContainerClassName(showCursor?: boolean) {
+    return [
+        mattermostPostTextClassName,
+        markdownBodyClassName,
+        showCursor ? cursorClassName : '',
+    ].filter(Boolean).join(' ');
 }

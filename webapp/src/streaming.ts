@@ -29,6 +29,15 @@ export function isLangflowStreamingPost(post?: Post | null): post is Post {
     return props.langflow_stream === 'true' || props.langflow_streaming === 'true';
 }
 
+export function isLangflowAwaitingFirstChunk(post?: Post | null) {
+    if (!post) {
+        return false;
+    }
+
+    const props = post.props || {};
+    return isLangflowStreamingPost(post) && props.langflow_stream_placeholder === 'true';
+}
+
 export function buildStreamingPostUpdate(state: GlobalState, data?: StreamingPostUpdateEventData): Post | null {
     const postID = normalizeIdentifier(data?.post_id);
     const nextMessage = typeof data?.next === 'string' ? data.next : '';
@@ -50,6 +59,7 @@ export function buildStreamingPostUpdate(state: GlobalState, data?: StreamingPos
             langflow_stream: 'true',
             langflow_streaming: 'true',
             langflow_stream_status: 'streaming',
+            langflow_stream_placeholder: 'false',
         },
     };
 }

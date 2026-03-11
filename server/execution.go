@@ -480,11 +480,12 @@ func (p *Plugin) postSuccess(channel *model.Channel, rootID string, account botA
 		Type:      langflowBotPostType,
 		Message:   buildBotResponseMessage(account.Definition.DisplayName, output, correlationID, false),
 		Props: map[string]any{
-			"from_bot":                "true",
-			"langflow_bot_id":         account.Definition.ID,
-			"langflow_correlation_id": correlationID,
-			"langflow_flow_id":        account.Definition.FlowID,
-			"langflow_stream":         "false",
+			"from_bot":                    "true",
+			"langflow_bot_id":             account.Definition.ID,
+			"langflow_correlation_id":     correlationID,
+			"langflow_flow_id":            account.Definition.FlowID,
+			"langflow_stream":             "false",
+			"langflow_stream_placeholder": "false",
 		},
 	})
 	if appErr != nil {
@@ -505,13 +506,14 @@ func (p *Plugin) postFailure(channel *model.Channel, rootID string, account botA
 		Type:      langflowBotPostType,
 		Message:   buildBotFailureMessage(account.Definition, correlationID, failure),
 		Props: map[string]any{
-			"from_bot":                "true",
-			"langflow_bot_id":         account.Definition.ID,
-			"langflow_correlation_id": correlationID,
-			"langflow_flow_id":        account.Definition.FlowID,
-			"langflow_error":          "true",
-			"langflow_stream":         "false",
-			"langflow_error_code":     failure.ErrorCode,
+			"from_bot":                    "true",
+			"langflow_bot_id":             account.Definition.ID,
+			"langflow_correlation_id":     correlationID,
+			"langflow_flow_id":            account.Definition.FlowID,
+			"langflow_error":              "true",
+			"langflow_stream":             "false",
+			"langflow_stream_placeholder": "false",
+			"langflow_error_code":         failure.ErrorCode,
 		},
 	})
 	if appErr != nil {
@@ -535,8 +537,9 @@ func (p *Plugin) postInstruction(channel *model.Channel, rootID string, account 
 		Type:      langflowBotPostType,
 		Message:   strings.TrimSpace(message),
 		Props: map[string]any{
-			"from_bot":        "true",
-			"langflow_bot_id": account.Definition.ID,
+			"from_bot":                    "true",
+			"langflow_bot_id":             account.Definition.ID,
+			"langflow_stream_placeholder": "false",
 		},
 	})
 	if appErr != nil {
@@ -606,13 +609,14 @@ func (p *Plugin) createStreamingPost(channel *model.Channel, rootID string, acco
 		Type:      langflowBotPostType,
 		Message:   buildBotStreamingMessage(account.Definition.DisplayName, ""),
 		Props: map[string]any{
-			"from_bot":                "true",
-			"langflow_bot_id":         account.Definition.ID,
-			"langflow_correlation_id": correlationID,
-			"langflow_flow_id":        account.Definition.FlowID,
-			"langflow_stream":         "true",
-			"langflow_streaming":      "true",
-			"langflow_stream_status":  "streaming",
+			"from_bot":                    "true",
+			"langflow_bot_id":             account.Definition.ID,
+			"langflow_correlation_id":     correlationID,
+			"langflow_flow_id":            account.Definition.FlowID,
+			"langflow_stream":             "true",
+			"langflow_streaming":          "true",
+			"langflow_stream_status":      "streaming",
+			"langflow_stream_placeholder": "true",
 		},
 	})
 	if appErr != nil {
@@ -681,12 +685,15 @@ func (u *streamingPostUpdater) render(content string, completed bool, failure ex
 		updatedPost.Props["langflow_error_code"] = failure.ErrorCode
 		updatedPost.Props["langflow_stream_status"] = "failed"
 		updatedPost.Props["langflow_streaming"] = "false"
+		updatedPost.Props["langflow_stream_placeholder"] = "false"
 	} else if completed {
 		updatedPost.Props["langflow_stream_status"] = "completed"
 		updatedPost.Props["langflow_streaming"] = "false"
+		updatedPost.Props["langflow_stream_placeholder"] = "false"
 	} else {
 		updatedPost.Props["langflow_stream_status"] = "streaming"
 		updatedPost.Props["langflow_streaming"] = "true"
+		updatedPost.Props["langflow_stream_placeholder"] = "false"
 	}
 
 	post, appErr := u.plugin.API.UpdatePost(&updatedPost)

@@ -13,8 +13,8 @@ test('PostEventListener notifies every listener registered for the same post', (
         },
     } as WebSocketMessage<{post_id: string; next: string}>;
 
-    listener.registerPostUpdateListener('post-id', first);
-    listener.registerPostUpdateListener('post-id', second);
+    listener.registerPostUpdateListener('post-id', 'first', first);
+    listener.registerPostUpdateListener('post-id', 'second', second);
     listener.handlePostUpdateWebsockets(message as any);
 
     expect(first).toHaveBeenCalledTimes(1);
@@ -32,9 +32,9 @@ test('PostEventListener unregisters one listener without affecting others', () =
         },
     } as WebSocketMessage<{post_id: string; next: string}>;
 
-    listener.registerPostUpdateListener('post-id', first);
-    listener.registerPostUpdateListener('post-id', second);
-    listener.unregisterPostUpdateListener('post-id', first);
+    listener.registerPostUpdateListener('post-id', 'first', first);
+    listener.registerPostUpdateListener('post-id', 'second', second);
+    listener.unregisterPostUpdateListener('post-id', 'first');
     listener.handlePostUpdateWebsockets(message as any);
 
     expect(first).not.toHaveBeenCalled();

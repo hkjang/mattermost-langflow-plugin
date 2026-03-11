@@ -5,22 +5,24 @@ import type {StreamingPostUpdateEventData} from './streaming';
 type PostUpdateListener = (msg: WebSocketMessage<StreamingPostUpdateEventData>) => void;
 
 export default class PostEventListener {
-    private readonly listeners = new Map<string, Set<PostUpdateListener>>();
+    private readonly listeners = new Map<string, Map<string, PostUpdateListener>>();
 
-    public registerPostUpdateListener = (postID: string, listener: PostUpdateListener) => {
+    public registerPostUpdateListener = (postID: string, listenerID: string, listener: PostUpdateListener) => {
         const normalizedPostID = normalizePostID(postID);
-        if (!normalizedPostID) {
+        const normalizedListenerID = normalizePostID(listenerID);
+        if (!normalizedPostID || !normalizedListenerID) {
             return;
         }
 
-        const postListeners = this.listeners.get(normalizedPostID) || new Set<PostUpdateListener>();
-        postListeners.add(listener);
+        const postListeners = this.listeners.get(normalizedPostID) || new Map<string, PostUpdateListener>();
+        postListeners.set(normalizedListenerID, listener);
         this.listeners.set(normalizedPostID, postListeners);
     };
 
-    public unregisterPostUpdateListener = (postID: string, listener: PostUpdateListener) => {
+    public unregisterPostUpdateListener = (postID: string, listenerID: string) => {
         const normalizedPostID = normalizePostID(postID);
-        if (!normalizedPostID) {
+        const normalizedListenerID = normalizePostID(listenerID);
+        if (!normalizedPostID || !normalizedListenerID) {
             return;
         }
 
@@ -29,7 +31,7 @@ export default class PostEventListener {
             return;
         }
 
-        postListeners.delete(listener);
+        postListeners.delete(normalizedListenerID);
         if (postListeners.size === 0) {
             this.listeners.delete(normalizedPostID);
         }
@@ -46,7 +48,7 @@ export default class PostEventListener {
             return;
         }
 
-        for (const listener of listeners) {
+        for (const listener of listeners.values()) {
             listener(msg);
         }
     };
