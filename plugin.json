@@ -1,7 +1,7 @@
 {
     "id": "com.mattermost.langflow",
     "name": "Langflow",
-    "version": "0.1.11-dev",
+    "version": "0.1.12-dev",
     "description": "Langflow flow와 1:1로 연결된 전용 Mattermost 봇을 통해 스트리밍 AI 응답을 제공합니다.",
     "homepage_url": "https://github.com/hkjang/mattermost-langflow-plugin",
     "support_url": "https://github.com/hkjang/mattermost-langflow-plugin/issues",

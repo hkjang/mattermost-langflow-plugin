@@ -187,7 +187,8 @@ func (p *Plugin) invokeLangflowStream(
 	parser := langflowStreamParser{}
 
 	var fallback bytes.Buffer
-	var streamOutput strings.Builder
+	currentOutput := ""
+	lastPublishedOutput := ""
 	finalOutput := ""
 
 	for {
@@ -216,9 +217,11 @@ func (p *Plugin) invokeLangflowStream(
 			if chunk == "" {
 				continue
 			}
-			streamOutput.WriteString(chunk)
-			if onUpdate != nil {
-				onUpdate(truncateString(streamOutput.String(), cfg.MaxOutputLength), false)
+			currentOutput = mergeLangflowStreamOutput(currentOutput, chunk)
+			nextOutput := truncateString(currentOutput, cfg.MaxOutputLength)
+			if onUpdate != nil && nextOutput != "" && nextOutput != lastPublishedOutput {
+				onUpdate(nextOutput, false)
+				lastPublishedOutput = nextOutput
 			}
 		case "error":
 			message := extractLangflowTextFromValue(event.Data)
@@ -239,15 +242,23 @@ func (p *Plugin) invokeLangflowStream(
 				finalOutput = candidate
 			}
 		default:
-			if finalOutput == "" {
-				finalOutput = extractAssistantMessageText(*event)
+			if snapshot := extractAssistantMessageText(*event); snapshot != "" {
+				currentOutput = mergeLangflowStreamOutput(currentOutput, snapshot)
+				nextOutput := truncateString(currentOutput, cfg.MaxOutputLength)
+				if onUpdate != nil && nextOutput != "" && nextOutput != lastPublishedOutput {
+					onUpdate(nextOutput, false)
+					lastPublishedOutput = nextOutput
+				}
+				if finalOutput == "" || len(snapshot) >= len(finalOutput) {
+					finalOutput = snapshot
+				}
 			}
 		}
 	}
 
 	output := strings.TrimSpace(finalOutput)
 	if output == "" {
-		output = strings.TrimSpace(streamOutput.String())
+		output = strings.TrimSpace(currentOutput)
 	}
 	if output == "" && fallback.Len() > 0 {
 		output = extractLangflowText(fallback.Bytes())
@@ -607,6 +618,12 @@ func (p *langflowStreamParser) parsePayload(payload, eventName string) (*langflo
 
 	var decoded any
 	if err := json.Unmarshal([]byte(payload), &decoded); err == nil {
+		if eventName == "" && looksLikeLangflowTokenPayload(decoded) {
+			return &langflowStreamEvent{
+				Event: "token",
+				Data:  decoded,
+			}, nil
+		}
 		return &langflowStreamEvent{
 			Event: defaultIfEmpty(eventName, "end"),
 			Data:  decoded,
@@ -662,6 +679,35 @@ func extractAssistantMessageText(event langflowStreamEvent) string {
 	}
 
 	return extractLangflowTextFromValue(event.Data)
+}
+
+func mergeLangflowStreamOutput(current, next string) string {
+	switch {
+	case next == "":
+		return current
+	case current == "":
+		return next
+	case strings.HasPrefix(next, current):
+		return next
+	case strings.HasPrefix(current, next):
+		return current
+	default:
+		return current + next
+	}
+}
+
+func looksLikeLangflowTokenPayload(value any) bool {
+	typed, ok := value.(map[string]any)
+	if !ok {
+		return false
+	}
+
+	for _, key := range []string{"chunk", "token", "delta"} {
+		if _, exists := typed[key]; exists {
+			return true
+		}
+	}
+	return false
 }
 
 func truncateString(value string, maxLength int) string {

@@ -152,6 +152,28 @@ func TestParseLangflowStreamFlushesOnEOF(t *testing.T) {
 	require.Equal(t, "EOF chunk", extractLangflowStreamChunk(event.Data))
 }
 
+func TestParseLangflowStreamRawChunkDefaultsToToken(t *testing.T) {
+	parser := langflowStreamParser{}
+
+	event, _, err := parser.readEvent(bufio.NewReader(strings.NewReader(`{"chunk":"Hello"}`)))
+	require.NoError(t, err)
+	require.NotNil(t, event)
+	require.Equal(t, "token", event.Event)
+	require.Equal(t, "Hello", extractLangflowStreamChunk(event.Data))
+}
+
+func TestMergeLangflowStreamOutputPrefersNewestSnapshot(t *testing.T) {
+	require.Equal(t, "Hello", mergeLangflowStreamOutput("", "Hello"))
+	require.Equal(t, "Hello world", mergeLangflowStreamOutput("Hello", "Hello world"))
+	require.Equal(t, "Hello world", mergeLangflowStreamOutput("Hello", " world"))
+}
+
+func TestStripLeadingLangflowLabel(t *testing.T) {
+	require.Equal(t, "실제 응답", stripLeadingLangflowLabel("### Langflow\n\n실제 응답"))
+	require.Equal(t, "실제 응답", stripLeadingLangflowLabel("langflow\n실제 응답"))
+	require.Equal(t, "실제 응답", stripLeadingLangflowLabel("**Langflow**\n실제 응답"))
+}
+
 func TestBuildLangflowRunURLPreservesSubpath(t *testing.T) {
 	testCases := []struct {
 		name     string

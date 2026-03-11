@@ -747,37 +747,23 @@ func (u *streamingPostUpdater) publishControlEvent(control string) {
 }
 
 func buildBotStreamingMessage(displayName, output string) string {
-	body := strings.TrimSpace(output)
+	body := stripLeadingLangflowLabel(strings.TrimSpace(output))
 	if body == "" {
-		body = "_Waiting for Langflow to stream a response..._"
+		body = "_응답 생성 중입니다..._"
 	}
-
-	parts := []string{
-		fmt.Sprintf("### %s", displayName),
-		"",
-		body,
-	}
-	return strings.TrimSpace(strings.Join(parts, "\n"))
+	return body
 }
 
 func buildBotResponseMessage(displayName, output, correlationID string, streaming bool) string {
-	body := strings.TrimSpace(output)
+	body := stripLeadingLangflowLabel(strings.TrimSpace(output))
 	if body == "" && streaming {
-		body = "_Waiting for Langflow to stream a response..._"
+		body = "_응답 생성 중입니다..._"
 	}
 	if body == "" {
-		body = "_Langflow returned an empty response._"
+		body = "_빈 응답이 반환되었습니다._"
 	}
 
-	parts := []string{
-		fmt.Sprintf("### %s", displayName),
-		"",
-		body,
-	}
-	if streaming {
-		parts = append(parts, "", "_Streaming response..._")
-	}
-	parts = append(parts, "", fmt.Sprintf("_Correlation ID:_ `%s`", correlationID))
+	parts := []string{body, "", fmt.Sprintf("_Correlation ID:_ `%s`", correlationID)}
 	return strings.TrimSpace(strings.Join(parts, "\n"))
 }
 
@@ -820,9 +806,7 @@ func describeExecutionFailure(err error, defaultRetryable bool) executionFailure
 
 func buildBotFailureMessage(bot BotDefinition, correlationID string, failure executionFailureView) string {
 	lines := []string{
-		fmt.Sprintf("### %s", defaultIfEmpty(bot.DisplayName, "@"+bot.Username)),
-		"",
-		fmt.Sprintf("Langflow flow `%s` 호출에 실패했습니다.", bot.FlowID),
+		fmt.Sprintf("Flow `%s` 호출에 실패했습니다.", bot.FlowID),
 	}
 
 	if failure.Message != "" {
@@ -889,4 +873,26 @@ func joinSyncIssues(issues []string) string {
 		filtered = append(filtered, issue)
 	}
 	return strings.Join(filtered, " | ")
+}
+
+func stripLeadingLangflowLabel(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+
+	lines := strings.Split(value, "\n")
+	for len(lines) > 0 {
+		normalized := strings.ToLower(strings.TrimSpace(lines[0]))
+		normalized = strings.TrimPrefix(normalized, "#")
+		normalized = strings.TrimPrefix(normalized, "#")
+		normalized = strings.TrimPrefix(normalized, "#")
+		normalized = strings.TrimSpace(strings.Trim(normalized, "*`:_-"))
+		if normalized != "langflow" {
+			break
+		}
+		lines = lines[1:]
+	}
+
+	return strings.TrimSpace(strings.Join(lines, "\n"))
 }

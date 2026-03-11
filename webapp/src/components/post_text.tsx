@@ -1,11 +1,13 @@
-import React, {useEffect, useRef} from 'react';
+import React, {useEffect, useMemo} from 'react';
 import {useSelector} from 'react-redux';
 
 import type {Channel} from '@mattermost/types/channels';
 import type {GlobalState} from '@mattermost/types/store';
 import type {Team} from '@mattermost/types/teams';
 
-import {cleanupMermaidArtifacts, containsCompleteMermaidFence, renderMermaidDiagrams} from '../mermaid_rendering';
+import MermaidDiagram from './mermaid_diagram';
+
+import {splitRenderableMessage} from '../mermaid_rendering';
 
 const cursorClassName = 'langflow-streaming-post-cursor';
 const markdownBodyClassName = 'langflow-markdown-body';
@@ -27,63 +29,32 @@ type Props = {
     showCursor?: boolean;
 };
 
+type PostUtils = {
+    formatText: (value: string, options: Record<string, unknown>) => string;
+    messageHtmlToComponent: (value: string, options: Record<string, unknown>) => React.ReactNode;
+};
+
 export default function PostText({message, channelID, postID, showCursor}: Props) {
     const channel = useSelector<GlobalState, Channel | undefined>((state) => state.entities.channels.channels[channelID]);
     const team = useSelector<GlobalState, Team | undefined>((state) => state.entities.teams.teams[channel?.team_id || '']);
     const siteURL = useSelector<GlobalState, string | undefined>((state) => state.entities.general.config.SiteURL);
-    const containerRef = useRef<HTMLDivElement | null>(null);
 
     useEffect(() => {
         ensureStreamingStyles();
     }, []);
 
-    useEffect(() => {
-        const cleanup = () => undefined;
-        const container = containerRef.current;
-        if (!container) {
-            return cleanup;
-        }
-
-        cleanupMermaidArtifacts(container);
-        if (!containsCompleteMermaidFence(message)) {
-            return () => {
-                cleanupMermaidArtifacts(container);
-            };
-        }
-
-        let cancelled = false;
-        renderMermaidDiagrams(container, postID, message).catch(() => {
-            if (!cancelled) {
-                cleanupMermaidArtifacts(container);
+    const segments = useMemo(() => splitRenderableMessage(message), [message]);
+    const lastTextSegmentIndex = useMemo(() => {
+        for (let index = segments.length - 1; index >= 0; index--) {
+            if (segments[index].kind === 'text') {
+                return index;
             }
-        });
+        }
+        return -1;
+    }, [segments]);
 
-        return () => {
-            cancelled = true;
-            cleanupMermaidArtifacts(container);
-        };
-    }, [message, postID]);
-
-    const postUtils = (window as any).PostUtils as {
-        formatText: (value: string, options: Record<string, unknown>) => string;
-        messageHtmlToComponent: (value: string, options: Record<string, unknown>) => React.ReactNode;
-    } | undefined;
-
-    if (!postUtils) {
-        return (
-            <div
-                className={buildContainerClassName(showCursor)}
-                data-testid='posttext'
-                ref={containerRef}
-                style={containerStyle}
-            >
-                {message}
-                {showCursor && <CursorFallback/>}
-            </div>
-        );
-    }
-
-    const formattedMessage = postUtils.formatText(message, {
+    const postUtils = (window as any).PostUtils as PostUtils | undefined;
+    const markdownOptions = {
         singleline: false,
         mentionHighlight: true,
         atMentions: true,
@@ -92,24 +63,66 @@ export default function PostText({message, channelID, postID, showCursor}: Props
         minimumHashtagLength: 1000000000,
         siteURL,
         markdown: true,
-    });
-
-    const content = postUtils.messageHtmlToComponent(formattedMessage, {
+    };
+    const componentOptions = {
         hasPluginTooltips: true,
         latex: false,
         inlinelatex: false,
         postId: postID,
-    });
+    };
+
+    if (!postUtils) {
+        return (
+            <div
+                className={buildContainerClassName(showCursor)}
+                data-testid='posttext'
+                style={containerStyle}
+            >
+                {message}
+                {showCursor && <CursorFallback/>}
+            </div>
+        );
+    }
+
+    const renderedSegments = segments.map((segment, index) => {
+        if (segment.kind === 'mermaid') {
+            return (
+                <MermaidDiagram
+                    definition={segment.content}
+                    index={index}
+                    key={`${postID}-mermaid-${index}`}
+                    postID={postID}
+                />
+            );
+        }
+
+        if (!segment.content) {
+            return null;
+        }
+
+        const formattedMessage = postUtils.formatText(segment.content, markdownOptions);
+        const content = postUtils.messageHtmlToComponent(formattedMessage, componentOptions);
+        if (!content) {
+            return index === lastTextSegmentIndex && showCursor ? <p key={`${postID}-empty-${index}`}/> : null;
+        }
+
+        return (
+            <React.Fragment key={`${postID}-text-${index}`}>
+                {content}
+            </React.Fragment>
+        );
+    }).filter(Boolean);
+
+    const shouldRenderFallbackCursor = showCursor && lastTextSegmentIndex < 0;
 
     return (
         <div
             className={buildContainerClassName(showCursor)}
             data-testid='posttext'
-            ref={containerRef}
             style={containerStyle}
         >
-            {content || <p/>}
-            {!content && showCursor && <CursorFallback/>}
+            {renderedSegments.length > 0 ? renderedSegments : <p/>}
+            {shouldRenderFallbackCursor && <CursorFallback/>}
         </div>
     );
 }
@@ -219,6 +232,10 @@ function ensureStreamingStyles() {
     height: auto;
     margin: 0 auto;
     max-width: 100%;
+}
+
+.${markdownBodyClassName} .langflow-mermaid-fallback {
+    margin: 12px 0;
 }
 `;
     document.head.appendChild(style);

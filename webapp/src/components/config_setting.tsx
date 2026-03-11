@@ -1,3 +1,4 @@
+import manifest from 'manifest';
 import React, {useEffect, useMemo, useState} from 'react';
 
 import type {
@@ -88,6 +89,13 @@ const sectionHeaderStyle: React.CSSProperties = {
     gap: '4px',
 };
 
+const titleRowStyle: React.CSSProperties = {
+    alignItems: 'center',
+    display: 'flex',
+    gap: '10px',
+    justifyContent: 'space-between',
+};
+
 const sectionTitleStyle: React.CSSProperties = {
     fontSize: '16px',
     fontWeight: 600,
@@ -163,6 +171,17 @@ const codeStyle: React.CSSProperties = {
     fontSize: '12px',
     padding: '12px',
     whiteSpace: 'pre-wrap',
+};
+
+const versionBadgeStyle: React.CSSProperties = {
+    background: 'rgba(var(--button-bg-rgb), 0.10)',
+    border: '1px solid rgba(var(--button-bg-rgb), 0.18)',
+    borderRadius: '999px',
+    color: 'var(--center-channel-color)',
+    fontSize: '12px',
+    fontWeight: 700,
+    padding: '4px 10px',
+    whiteSpace: 'nowrap',
 };
 
 const sampleBots: BotDefinition[] = [
@@ -380,7 +399,10 @@ export default function ConfigSetting(props: CustomSettingProps) {
         <div style={containerStyle}>
             <section style={sectionStyle}>
                 <div style={sectionHeaderStyle}>
-                    <div style={sectionTitleStyle}>{'Langflow 설정'}</div>
+                    <div style={titleRowStyle}>
+                        <div style={sectionTitleStyle}>{'Langflow 설정'}</div>
+                        <span style={versionBadgeStyle}>{`플러그인 버전 ${manifest.version}`}</span>
+                    </div>
                     <div style={sectionSubtitleStyle}>
                         {'Agents 플러그인처럼 서비스 연결과 봇 카탈로그를 한 화면에서 관리합니다. 봇 1개는 Langflow flow 1개에 고정 연결됩니다.'}
                     </div>

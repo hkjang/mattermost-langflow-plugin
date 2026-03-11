@@ -1,40 +1,28 @@
-/**
- * @jest-environment jsdom
- */
-
-import {cleanupMermaidArtifacts, containsCompleteMermaidFence, findMermaidCodeBlocks} from './mermaid_rendering';
+import {containsCompleteMermaidFence, splitRenderableMessage} from './mermaid_rendering';
 
 test('containsCompleteMermaidFence matches only closed mermaid fences', () => {
     expect(containsCompleteMermaidFence('```mermaid\ngraph TD\nA-->B\n```')).toBe(true);
     expect(containsCompleteMermaidFence('```mermaid\ngraph TD\nA-->B')).toBe(false);
 });
 
-test('findMermaidCodeBlocks locates mermaid code elements', () => {
-    document.body.innerHTML = `
-        <div>
-            <pre><code class="language-mermaid">graph TD\nA-->B</code></pre>
-            <pre><code class="language-js">console.log('nope')</code></pre>
-        </div>
-    `;
+test('splitRenderableMessage separates text and mermaid segments', () => {
+    const segments = splitRenderableMessage([
+        '서두 문장',
+        '```mermaid',
+        'graph TD',
+        'A-->B',
+        '```',
+        '마무리 문장',
+    ].join('\n'));
 
-    const nodes = findMermaidCodeBlocks(document.body);
-    expect(nodes).toHaveLength(1);
-    expect(nodes[0].textContent).toContain('graph TD');
+    expect(segments).toEqual([
+        {kind: 'text', content: '서두 문장\n'},
+        {kind: 'mermaid', content: 'graph TD\nA-->B'},
+        {kind: 'text', content: '\n마무리 문장'},
+    ]);
 });
 
-test('cleanupMermaidArtifacts removes rendered diagrams and restores hidden sources', () => {
-    document.body.innerHTML = `
-        <div id="root">
-            <pre data-langflow-mermaid-hidden="true" style="display:none"><code class="language-mermaid">graph TD\nA-->B</code></pre>
-            <div class="langflow-mermaid-rendered"><svg></svg></div>
-        </div>
-    `;
-
-    const root = document.getElementById('root') as HTMLElement;
-    cleanupMermaidArtifacts(root);
-
-    expect(root.querySelector('.langflow-mermaid-rendered')).toBeNull();
-    const source = root.querySelector('pre') as HTMLElement;
-    expect(source.style.display).toBe('');
-    expect(source.hasAttribute('data-langflow-mermaid-hidden')).toBe(false);
+test('splitRenderableMessage keeps plain text when mermaid fence is incomplete', () => {
+    const message = '```mermaid\ngraph TD\nA-->B';
+    expect(splitRenderableMessage(message)).toEqual([{kind: 'text', content: message}]);
 });

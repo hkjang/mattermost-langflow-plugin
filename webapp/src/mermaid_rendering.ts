@@ -6,86 +6,76 @@ type MermaidModule = {
     }>;
 };
 
-const mermaidFencePattern = /```mermaid[\t ]*\r?\n[\s\S]*?\r?\n```/i;
-const mermaidCodeSelector = [
-    'pre code.language-mermaid',
-    'pre code.lang-mermaid',
-    'pre code[class*="language-mermaid"]',
-    'pre code[class*="lang-mermaid"]',
-    '.post-code code.language-mermaid',
-    '.post-code code.lang-mermaid',
-    '.post-code code[class*="language-mermaid"]',
-    '.post-code code[class*="lang-mermaid"]',
-].join(', ');
+export type RenderableMessageSegment = {
+    kind: 'text' | 'mermaid';
+    content: string;
+};
 
-const renderedDiagramClassName = 'langflow-mermaid-rendered';
-const hiddenSourceAttribute = 'data-langflow-mermaid-hidden';
+const mermaidFencePattern = /```mermaid[\t ]*\r?\n([\s\S]*?)\r?\n```/gi;
 
 let mermaidLoader: Promise<MermaidModule> | null = null;
 let mermaidInitialized = false;
 
 export function containsCompleteMermaidFence(message: string) {
-    return mermaidFencePattern.test(message);
+    return (/```mermaid[\t ]*\r?\n[\s\S]*?\r?\n```/i).test(message);
 }
 
-export function findMermaidCodeBlocks(container: ParentNode) {
-    return Array.from(container.querySelectorAll(mermaidCodeSelector)) as HTMLElement[];
+export function splitRenderableMessage(message: string): RenderableMessageSegment[] {
+    const segments: RenderableMessageSegment[] = [];
+    const text = message || '';
+    const matcher = new RegExp(mermaidFencePattern);
+
+    let lastIndex = 0;
+    let match = matcher.exec(text);
+    while (match) {
+        const fullMatch = match[0];
+        const definition = (match[1] || '').trim();
+        const matchIndex = match.index;
+
+        if (matchIndex > lastIndex) {
+            segments.push({
+                kind: 'text',
+                content: text.slice(lastIndex, matchIndex),
+            });
+        }
+
+        if (definition) {
+            segments.push({
+                kind: 'mermaid',
+                content: definition,
+            });
+        } else {
+            segments.push({
+                kind: 'text',
+                content: fullMatch,
+            });
+        }
+
+        lastIndex = matchIndex + fullMatch.length;
+        match = matcher.exec(text);
+    }
+
+    if (lastIndex < text.length) {
+        segments.push({
+            kind: 'text',
+            content: text.slice(lastIndex),
+        });
+    }
+
+    if (segments.length === 0) {
+        return [{kind: 'text', content: text}];
+    }
+
+    return segments.filter((segment, index) => (
+        segment.kind === 'mermaid' ||
+        segment.content !== '' ||
+        index === segments.length - 1
+    ));
 }
 
-export async function renderMermaidDiagrams(container: HTMLElement, postID: string, message: string) {
-    cleanupMermaidArtifacts(container);
-    if (!containsCompleteMermaidFence(message)) {
-        return;
-    }
-
-    const mermaidBlocks = findMermaidCodeBlocks(container);
-    if (mermaidBlocks.length === 0) {
-        return;
-    }
-
+export async function renderMermaidDefinition(definition: string, postID: string, index: number) {
     const mermaid = await getMermaid();
-    await Promise.all(mermaidBlocks.map(async (codeElement, index) => {
-        const definition = extractCodeText(codeElement);
-        if (!definition) {
-            return;
-        }
-
-        const sourceContainer = findSourceContainer(codeElement);
-        if (!sourceContainer) {
-            return;
-        }
-
-        const target = document.createElement('div');
-        target.className = renderedDiagramClassName;
-        target.setAttribute('data-langflow-mermaid-id', `${postID}-${index}`);
-
-        try {
-            const diagramID = buildDiagramID(postID, index);
-            const {svg, bindFunctions} = await mermaid.render(diagramID, definition);
-            target.innerHTML = svg;
-            bindFunctions?.(target);
-            sourceContainer.style.display = 'none';
-            sourceContainer.setAttribute(hiddenSourceAttribute, 'true');
-            sourceContainer.insertAdjacentElement('afterend', target);
-        } catch (error) {
-            target.remove();
-            sourceContainer.style.display = '';
-            sourceContainer.removeAttribute(hiddenSourceAttribute);
-            sourceContainer.setAttribute('data-langflow-mermaid-error', stringifyError(error));
-        }
-    }));
-}
-
-export function cleanupMermaidArtifacts(container: HTMLElement) {
-    for (const rendered of Array.from(container.querySelectorAll(`.${renderedDiagramClassName}`))) {
-        rendered.remove();
-    }
-
-    for (const hiddenSource of Array.from(container.querySelectorAll(`[${hiddenSourceAttribute}="true"]`)) as HTMLElement[]) {
-        hiddenSource.style.display = '';
-        hiddenSource.removeAttribute(hiddenSourceAttribute);
-        hiddenSource.removeAttribute('data-langflow-mermaid-error');
-    }
+    return mermaid.render(buildDiagramID(postID, index), definition);
 }
 
 async function getMermaid() {
@@ -109,23 +99,7 @@ async function getMermaid() {
     return mermaidLoader;
 }
 
-function extractCodeText(codeElement: HTMLElement) {
-    return (codeElement.textContent || '').trim();
-}
-
-function findSourceContainer(codeElement: HTMLElement) {
-    return (codeElement.closest('pre, .post-code') || codeElement) as HTMLElement | null;
-}
-
 function buildDiagramID(postID: string, index: number) {
     const normalized = postID.replace(/[^a-zA-Z0-9_-]/g, '');
     return `langflow-mermaid-${normalized}-${index}-${Date.now()}`;
-}
-
-function stringifyError(error: unknown) {
-    if (error instanceof Error) {
-        return error.message;
-    }
-
-    return String(error);
 }
