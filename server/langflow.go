@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -14,6 +15,7 @@ import (
 
 type langflowRunPayload struct {
 	InputValue string `json:"input_value"`
+	SessionID  string `json:"session_id,omitempty"`
 }
 
 type langflowConnectionStatus struct {
@@ -23,35 +25,20 @@ type langflowConnectionStatus struct {
 	Message    string `json:"message"`
 }
 
-func (p *Plugin) invokeLangflow(ctx context.Context, cfg *runtimeConfiguration, bot BotDefinition, prompt, correlationID string) (string, int, error) {
-	if cfg.ParsedBaseURL == nil {
-		return "", 0, fmt.Errorf("Langflow base URL is not configured")
-	}
-	if !hostAllowed(cfg.ParsedBaseURL.Hostname(), cfg.AllowHosts) {
-		return "", 0, fmt.Errorf("Langflow host %q is not allowed by configuration", cfg.ParsedBaseURL.Hostname())
-	}
+type langflowStreamEvent struct {
+	Event string `json:"event"`
+	Data  any    `json:"data"`
+}
 
-	payload := langflowRunPayload{
-		InputValue: prompt,
-	}
+type langflowStreamParser struct {
+	pendingEvent string
+}
 
-	body, err := json.Marshal(payload)
+func (p *Plugin) invokeLangflow(ctx context.Context, cfg *runtimeConfiguration, bot BotDefinition, prompt, sessionID, correlationID string) (string, int, error) {
+	request, err := p.newLangflowRunRequest(ctx, cfg, bot, prompt, sessionID, correlationID, false)
 	if err != nil {
-		return "", 0, fmt.Errorf("failed to marshal Langflow payload: %w", err)
+		return "", 0, err
 	}
-
-	endpointURL, err := cfg.ParsedBaseURL.Parse("/api/v1/run/" + url.PathEscape(bot.FlowID))
-	if err != nil {
-		return "", 0, fmt.Errorf("failed to build Langflow endpoint: %w", err)
-	}
-
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpointURL.String(), bytes.NewReader(body))
-	if err != nil {
-		return "", 0, fmt.Errorf("failed to build Langflow request: %w", err)
-	}
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("X-Correlation-ID", correlationID)
-	p.applyAuthHeader(request, cfg)
 
 	client := &http.Client{Timeout: cfg.DefaultTimeout}
 	response, err := client.Do(request)
@@ -74,6 +61,168 @@ func (p *Plugin) invokeLangflow(ctx context.Context, cfg *runtimeConfiguration, 
 		output = strings.TrimSpace(string(responseBody))
 	}
 	return truncateString(output, cfg.MaxOutputLength), response.StatusCode, nil
+}
+
+func (p *Plugin) invokeLangflowStream(
+	ctx context.Context,
+	cfg *runtimeConfiguration,
+	bot BotDefinition,
+	prompt, sessionID, correlationID string,
+	onUpdate func(string, bool),
+) (string, int, error) {
+	request, err := p.newLangflowRunRequest(ctx, cfg, bot, prompt, sessionID, correlationID, true)
+	if err != nil {
+		return "", 0, err
+	}
+
+	client := &http.Client{Timeout: cfg.DefaultTimeout}
+	response, err := client.Do(request)
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to contact Langflow: %w", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode >= http.StatusBadRequest {
+		responseBody, readErr := io.ReadAll(io.LimitReader(response.Body, int64(cfg.MaxOutputLength*4)))
+		if readErr != nil {
+			return "", response.StatusCode, fmt.Errorf("Langflow returned %d and the error body could not be read: %w", response.StatusCode, readErr)
+		}
+		return "", response.StatusCode, fmt.Errorf("Langflow returned %d: %s", response.StatusCode, summarizeErrorBody(responseBody))
+	}
+
+	parser := langflowStreamParser{}
+	scanner := bufio.NewScanner(response.Body)
+	scanner.Buffer(make([]byte, 0, 32*1024), maxInt(cfg.MaxOutputLength*8, 512*1024))
+
+	var fallback bytes.Buffer
+	var streamOutput strings.Builder
+	finalOutput := ""
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" {
+			fallback.WriteString(trimmed)
+			fallback.WriteByte('\n')
+		}
+
+		event, parseErr := parser.parseLine(line)
+		if parseErr != nil {
+			if cfg.EnableDebugLogs {
+				p.API.LogDebug("Ignoring Langflow stream line that could not be parsed", "error", parseErr, "correlation_id", correlationID)
+			}
+			continue
+		}
+		if event == nil {
+			continue
+		}
+
+		switch strings.ToLower(strings.TrimSpace(event.Event)) {
+		case "token":
+			chunk := extractLangflowStreamChunk(event.Data)
+			if chunk == "" {
+				continue
+			}
+			streamOutput.WriteString(chunk)
+			if onUpdate != nil {
+				onUpdate(truncateString(streamOutput.String(), cfg.MaxOutputLength), false)
+			}
+		case "error":
+			message := extractLangflowTextFromValue(event.Data)
+			if message == "" {
+				message = "Langflow streaming request failed"
+			}
+			return "", response.StatusCode, fmt.Errorf("%s", message)
+		case "end":
+			if candidate := extractLangflowTextFromValue(event.Data); candidate != "" {
+				finalOutput = candidate
+			}
+		default:
+			if finalOutput == "" {
+				finalOutput = extractAssistantMessageText(*event)
+			}
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return "", response.StatusCode, fmt.Errorf("failed to read Langflow stream: %w", err)
+	}
+
+	output := strings.TrimSpace(finalOutput)
+	if output == "" {
+		output = strings.TrimSpace(streamOutput.String())
+	}
+	if output == "" && fallback.Len() > 0 {
+		output = extractLangflowText(fallback.Bytes())
+	}
+	output = truncateString(output, cfg.MaxOutputLength)
+	if output == "" {
+		return "", response.StatusCode, fmt.Errorf("Langflow streaming response did not contain any text")
+	}
+
+	if onUpdate != nil {
+		onUpdate(output, true)
+	}
+
+	return output, response.StatusCode, nil
+}
+
+func (p *Plugin) newLangflowRunRequest(
+	ctx context.Context,
+	cfg *runtimeConfiguration,
+	bot BotDefinition,
+	prompt, sessionID, correlationID string,
+	stream bool,
+) (*http.Request, error) {
+	if cfg.ParsedBaseURL == nil {
+		return nil, fmt.Errorf("Langflow base URL is not configured")
+	}
+	if !hostAllowed(cfg.ParsedBaseURL.Hostname(), cfg.AllowHosts) {
+		return nil, fmt.Errorf("Langflow host %q is not allowed by configuration", cfg.ParsedBaseURL.Hostname())
+	}
+
+	payload := langflowRunPayload{
+		InputValue: prompt,
+		SessionID:  sessionID,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal Langflow payload: %w", err)
+	}
+
+	endpointURL, err := buildLangflowRunURL(cfg.ParsedBaseURL, bot.FlowID, stream)
+	if err != nil {
+		return nil, err
+	}
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpointURL.String(), bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to build Langflow request: %w", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Correlation-ID", correlationID)
+	if stream {
+		request.Header.Set("Accept", "text/event-stream, application/json")
+	} else {
+		request.Header.Set("Accept", "application/json")
+	}
+	p.applyAuthHeader(request, cfg)
+
+	return request, nil
+}
+
+func buildLangflowRunURL(baseURL *url.URL, flowID string, stream bool) (*url.URL, error) {
+	endpointURL, err := baseURL.Parse("/api/v1/run/" + url.PathEscape(flowID))
+	if err != nil {
+		return nil, fmt.Errorf("failed to build Langflow endpoint: %w", err)
+	}
+	if stream {
+		query := endpointURL.Query()
+		query.Set("stream", "true")
+		endpointURL.RawQuery = query.Encode()
+	}
+	return endpointURL, nil
 }
 
 func (p *Plugin) testLangflowConnection(ctx context.Context, cfg *runtimeConfiguration) (*langflowConnectionStatus, error) {
@@ -176,8 +325,21 @@ func extractLangflowText(body []byte) string {
 		return strings.TrimSpace(string(body))
 	}
 
+	text := extractLangflowTextFromValue(payload)
+	if text != "" {
+		return text
+	}
+
+	pretty, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return ""
+	}
+	return string(pretty)
+}
+
+func extractLangflowTextFromValue(value any) string {
 	candidates := make([]string, 0, 8)
-	collectTextCandidates(payload, &candidates)
+	collectTextCandidates(value, &candidates)
 
 	best := ""
 	for _, candidate := range candidates {
@@ -190,15 +352,7 @@ func extractLangflowText(body []byte) string {
 		}
 	}
 
-	if best != "" {
-		return best
-	}
-
-	pretty, err := json.MarshalIndent(payload, "", "  ")
-	if err != nil {
-		return ""
-	}
-	return string(pretty)
+	return best
 }
 
 func collectTextCandidates(value any, candidates *[]string) {
@@ -234,7 +388,102 @@ func isLikelyTextKey(key string) bool {
 		strings.Contains(key, "output") ||
 		strings.Contains(key, "result") ||
 		strings.Contains(key, "content") ||
-		strings.Contains(key, "response")
+		strings.Contains(key, "response") ||
+		strings.Contains(key, "chunk")
+}
+
+func (p *langflowStreamParser) parseLine(line string) (*langflowStreamEvent, error) {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		p.pendingEvent = ""
+		return nil, nil
+	}
+	if strings.HasPrefix(line, ":") {
+		return nil, nil
+	}
+	if strings.HasPrefix(line, "event:") {
+		p.pendingEvent = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+		return nil, nil
+	}
+	if strings.HasPrefix(line, "data:") {
+		line = strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+	}
+	if line == "" {
+		return nil, nil
+	}
+	if line == "[DONE]" {
+		return &langflowStreamEvent{Event: "end", Data: map[string]any{}}, nil
+	}
+
+	var event langflowStreamEvent
+	if err := json.Unmarshal([]byte(line), &event); err == nil && (event.Event != "" || event.Data != nil) {
+		if event.Event == "" && p.pendingEvent != "" {
+			event.Event = p.pendingEvent
+		}
+		return &event, nil
+	}
+
+	var payload any
+	if err := json.Unmarshal([]byte(line), &payload); err == nil {
+		eventName := "end"
+		if p.pendingEvent != "" {
+			eventName = p.pendingEvent
+		}
+		return &langflowStreamEvent{
+			Event: eventName,
+			Data:  payload,
+		}, nil
+	}
+
+	if p.pendingEvent != "" {
+		return &langflowStreamEvent{
+			Event: p.pendingEvent,
+			Data:  map[string]any{"chunk": line},
+		}, nil
+	}
+
+	return &langflowStreamEvent{
+		Event: "message",
+		Data:  map[string]any{"text": line},
+	}, nil
+}
+
+func extractLangflowStreamChunk(data any) string {
+	if typed, ok := data.(map[string]any); ok {
+		for _, key := range []string{"chunk", "token", "text", "content", "message"} {
+			if value, ok := typed[key]; ok {
+				switch chunk := value.(type) {
+				case string:
+					return chunk
+				case nil:
+					return ""
+				default:
+					return fmt.Sprint(chunk)
+				}
+			}
+		}
+	}
+	return extractLangflowTextFromValue(data)
+}
+
+func extractAssistantMessageText(event langflowStreamEvent) string {
+	eventName := strings.ToLower(strings.TrimSpace(event.Event))
+	if eventName != "add_message" && eventName != "message" && eventName != "update_message" {
+		return ""
+	}
+
+	if typed, ok := event.Data.(map[string]any); ok {
+		sender := strings.ToLower(stringifyValue(typed["sender"]))
+		senderName := strings.ToLower(stringifyValue(typed["sender_name"]))
+		if sender != "" && sender != "machine" && sender != "assistant" && sender != "bot" {
+			return ""
+		}
+		if sender == "" && senderName != "" && !strings.Contains(senderName, "assistant") && !strings.Contains(senderName, "machine") && !strings.Contains(senderName, "bot") {
+			return ""
+		}
+	}
+
+	return extractLangflowTextFromValue(event.Data)
 }
 
 func truncateString(value string, maxLength int) string {
@@ -259,4 +508,28 @@ func minDuration(values ...time.Duration) time.Duration {
 		}
 	}
 	return minimum
+}
+
+func maxInt(values ...int) int {
+	if len(values) == 0 {
+		return 0
+	}
+	maximum := values[0]
+	for _, value := range values[1:] {
+		if value > maximum {
+			maximum = value
+		}
+	}
+	return maximum
+}
+
+func stringifyValue(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case nil:
+		return ""
+	default:
+		return strings.TrimSpace(fmt.Sprint(typed))
+	}
 }

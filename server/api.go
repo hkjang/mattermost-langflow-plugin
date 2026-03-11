@@ -22,15 +22,17 @@ type runBotAPIRequest struct {
 }
 
 type pluginStatusResponse struct {
-	PluginID    string                    `json:"plugin_id"`
-	BaseURL     string                    `json:"base_url"`
-	BotCount    int                       `json:"bot_count"`
-	AllowHosts  []string                  `json:"allow_hosts"`
-	Bots        []BotDefinition           `json:"bots"`
-	ManagedBots []botSyncEntry            `json:"managed_bots"`
-	BotSync     botSyncState              `json:"bot_sync"`
-	ConfigError string                    `json:"config_error,omitempty"`
-	Connection  *langflowConnectionStatus `json:"connection,omitempty"`
+	PluginID                  string                    `json:"plugin_id"`
+	BaseURL                   string                    `json:"base_url"`
+	BotCount                  int                       `json:"bot_count"`
+	AllowHosts                []string                  `json:"allow_hosts"`
+	Bots                      []BotDefinition           `json:"bots"`
+	ManagedBots               []botSyncEntry            `json:"managed_bots"`
+	BotSync                   botSyncState              `json:"bot_sync"`
+	StreamingEnabled          bool                      `json:"streaming_enabled"`
+	StreamingUpdateIntervalMS int64                     `json:"streaming_update_interval_ms"`
+	ConfigError               string                    `json:"config_error,omitempty"`
+	Connection                *langflowConnectionStatus `json:"connection,omitempty"`
 }
 
 func (p *Plugin) initRouter() *mux.Router {
@@ -83,6 +85,8 @@ func (p *Plugin) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	status.BaseURL = runtimeCfg.LangflowBaseURL
 	status.Bots = runtimeCfg.BotDefinitions
 	status.ManagedBots = status.BotSync.Entries
+	status.StreamingEnabled = runtimeCfg.EnableStreaming
+	status.StreamingUpdateIntervalMS = runtimeCfg.StreamingUpdateInterval.Milliseconds()
 	writeJSON(w, http.StatusOK, status)
 }
 

@@ -61,6 +61,8 @@ export type PluginStatus = {
     bots: BotDefinition[];
     managed_bots: ManagedBotStatus[];
     bot_sync: BotSyncState;
+    streaming_enabled: boolean;
+    streaming_update_interval_ms: number;
     config_error?: string;
 };
 

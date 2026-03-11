@@ -8,6 +8,7 @@ Mattermost channels, threads, and DMs can trigger Langflow flows through dedicat
 - System Console configuration for the Langflow server, auth token, allowlist, limits, and a visual multi-bot catalog editor
 - Multiple Mattermost bot accounts, each bound to one Langflow flow
 - Bot mention and DM trigger through `@bot-username`
+- Streaming bot replies by updating a single Mattermost post as Langflow tokens arrive
 - Right-hand sidebar runner that lets users choose a configured bot
 - Recent conversation context injection
 - Threaded response posting through the selected bot account
@@ -54,24 +55,26 @@ Saving the System Console configuration applies those bot definitions immediatel
 
 ## Langflow request shape
 
-Each bot calls the Langflow run API in this form:
+Each bot calls the Langflow run API in this form when streaming replies are enabled:
 
 ```bash
-curl -X POST "http://your-langflow-instance-url/api/v1/run/$FLOW_ID" \
+curl -X POST "http://your-langflow-instance-url/api/v1/run/$FLOW_ID?stream=true" \
   -H "Authorization: Bearer YOUR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "input_value": "Your input text here"
+    "input_value": "Your input text here",
+    "session_id": "mattermost:bot-id:thread-or-channel:user-id"
   }'
 ```
 
-The plugin builds `input_value` from the user prompt, optional structured inputs, and optional recent Mattermost context.
+The plugin builds `input_value` from the user prompt, optional structured inputs, and optional recent Mattermost context. The `session_id` is derived from the Mattermost thread or channel so follow-up messages can stay correlated on the Langflow side.
 
 ## Bot usage
 
 - Mention the bot in a channel or thread: `@thread-summary-bot Summarize this thread`
 - Send the bot a direct message: `What are the action items?`
 - Use the RHS panel to pick a configured bot and send a prompt without typing the mention manually
+- When streaming is enabled, the bot creates one reply and that same reply is updated progressively until the Langflow run completes
 
 ## Notes
 

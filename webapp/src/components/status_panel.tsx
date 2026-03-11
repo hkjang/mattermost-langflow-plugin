@@ -65,6 +65,8 @@ export default function StatusPanel() {
                     <div>{`Base URL: ${status.base_url || 'Not configured'}`}</div>
                     <div>{`Configured bots: ${status.bot_count}`}</div>
                     <div>{`Allowed hosts: ${(status.allow_hosts || []).join(', ') || 'Uses Langflow host'}`}</div>
+                    <div>{`Streaming replies: ${status.streaming_enabled ? 'enabled' : 'disabled'}`}</div>
+                    <div>{`Streaming update interval: ${status.streaming_update_interval_ms || 0} ms`}</div>
                     {status.config_error && <div>{`Config error: ${status.config_error}`}</div>}
                     {status.bot_sync?.last_error && <div>{`Bot sync error: ${status.bot_sync.last_error}`}</div>}
                     {(status.bots || []).length > 0 && (
@@ -117,6 +119,9 @@ export default function StatusPanel() {
             </div>
             <div style={{fontSize: '12px', opacity: 0.8}}>
                 {'Users can then DM the bot or @mention it in Mattermost, and the plugin will call the mapped Langflow run API for that bot.'}
+            </div>
+            <div style={{fontSize: '12px', opacity: 0.8}}>
+                {'When streaming is enabled, the plugin posts one bot reply first and then updates that same post as Langflow tokens arrive.'}
             </div>
         </div>
     );

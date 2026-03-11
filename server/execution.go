@@ -37,6 +37,16 @@ type BotRunResult struct {
 	Retryable     bool   `json:"retryable"`
 }
 
+type streamingPostUpdater struct {
+	plugin        *Plugin
+	post          *model.Post
+	account       botAccount
+	correlationID string
+	interval      time.Duration
+	lastRendered  string
+	lastUpdateAt  time.Time
+}
+
 func (p *Plugin) executeBotAndPost(ctx context.Context, request BotRunRequest) (*BotRunResult, error) {
 	startedAt := time.Now()
 	correlationID := uuid.NewString()
@@ -89,13 +99,42 @@ func (p *Plugin) executeBotAndPost(ctx context.Context, request BotRunRequest) (
 		return nil, fmt.Errorf("prompt is empty")
 	}
 
-	output, statusCode, runErr := p.invokeLangflow(ctx, cfg, *bot, prompt, correlationID)
+	sessionID := buildLangflowSessionID(request, account.Definition)
+	var streamUpdater *streamingPostUpdater
+	if cfg.EnableStreaming {
+		placeholder, placeholderErr := p.createStreamingPost(channel, request.RootID, account, correlationID)
+		if placeholderErr != nil {
+			return nil, placeholderErr
+		}
+		streamUpdater = &streamingPostUpdater{
+			plugin:        p,
+			post:          placeholder,
+			account:       account,
+			correlationID: correlationID,
+			interval:      cfg.StreamingUpdateInterval,
+			lastRendered:  placeholder.Message,
+		}
+	}
+
+	var output string
+	var statusCode int
+	var runErr error
+	if cfg.EnableStreaming {
+		output, statusCode, runErr = p.invokeLangflowStream(ctx, cfg, *bot, prompt, sessionID, correlationID, streamUpdater.update)
+	} else {
+		output, statusCode, runErr = p.invokeLangflow(ctx, cfg, *bot, prompt, sessionID, correlationID)
+	}
 	completedAt := time.Now()
 	if runErr != nil {
 		record := newExecutionRecord(request, account.Definition, correlationID, "failed", prompt, runErr.Error(), statusCode >= 500 || statusCode == 0, startedAt, completedAt)
 		p.appendExecutionHistory(request.UserID, record)
 		p.logUsage(cfg, correlationID, request, account.Definition, "failed", runErr.Error())
-		postErr := p.postFailure(channel, request.RootID, account, correlationID, runErr.Error())
+		var postErr error
+		if streamUpdater != nil {
+			postErr = streamUpdater.fail(runErr.Error())
+		} else {
+			postErr = p.postFailure(channel, request.RootID, account, correlationID, runErr.Error())
+		}
 		if postErr != nil {
 			p.API.LogError("Failed to post Langflow error response", "error", postErr, "correlation_id", correlationID)
 		}
@@ -111,7 +150,12 @@ func (p *Plugin) executeBotAndPost(ctx context.Context, request BotRunRequest) (
 		}, runErr
 	}
 
-	post, err := p.postSuccess(channel, request.RootID, account, correlationID, output)
+	var post *model.Post
+	if streamUpdater != nil {
+		post, err = streamUpdater.complete(output)
+	} else {
+		post, err = p.postSuccess(channel, request.RootID, account, correlationID, output)
+	}
 	if err != nil {
 		record := newExecutionRecord(request, account.Definition, correlationID, "failed", prompt, err.Error(), true, startedAt, time.Now())
 		p.appendExecutionHistory(request.UserID, record)
@@ -405,16 +449,12 @@ func (p *Plugin) postSuccess(channel *model.Channel, rootID string, account botA
 		UserId:    account.UserID,
 		ChannelId: channel.Id,
 		RootId:    rootID,
-		Message: strings.TrimSpace(fmt.Sprintf(
-			"### %s\n\n%s\n\n_Correlation ID:_ `%s`",
-			account.Definition.DisplayName,
-			output,
-			correlationID,
-		)),
+		Message:   buildBotResponseMessage(account.Definition.DisplayName, output, correlationID, false),
 		Props: map[string]any{
 			"from_bot":         "true",
 			"langflow_bot_id":  account.Definition.ID,
 			"langflow_flow_id": account.Definition.FlowID,
+			"langflow_stream":  "false",
 		},
 	})
 	if appErr != nil {
@@ -444,6 +484,7 @@ func (p *Plugin) postFailure(channel *model.Channel, rootID string, account botA
 			"langflow_bot_id":  account.Definition.ID,
 			"langflow_flow_id": account.Definition.FlowID,
 			"langflow_error":   "true",
+			"langflow_stream":  "false",
 		},
 	})
 	if appErr != nil {
@@ -523,4 +564,141 @@ func botDescription(bot BotDefinition) string {
 		return description
 	}
 	return fmt.Sprintf("Langflow bot for flow %s", bot.FlowID)
+}
+
+func (p *Plugin) createStreamingPost(channel *model.Channel, rootID string, account botAccount, correlationID string) (*model.Post, error) {
+	if err := p.ensureBotInChannel(channel.Id, account.UserID); err != nil {
+		return nil, err
+	}
+
+	post, appErr := p.API.CreatePost(&model.Post{
+		UserId:    account.UserID,
+		ChannelId: channel.Id,
+		RootId:    rootID,
+		Message:   buildBotResponseMessage(account.Definition.DisplayName, "", correlationID, true),
+		Props: map[string]any{
+			"from_bot":               "true",
+			"langflow_bot_id":        account.Definition.ID,
+			"langflow_flow_id":       account.Definition.FlowID,
+			"langflow_stream":        "true",
+			"langflow_streaming":     "true",
+			"langflow_stream_status": "streaming",
+		},
+	})
+	if appErr != nil {
+		return nil, fmt.Errorf("failed to create Langflow streaming post: %w", appErr)
+	}
+	return post, nil
+}
+
+func (u *streamingPostUpdater) update(content string, final bool) {
+	if u == nil || u.post == nil {
+		return
+	}
+	if !final && u.interval > 0 && !u.lastUpdateAt.IsZero() && time.Since(u.lastUpdateAt) < u.interval {
+		return
+	}
+	if _, err := u.render(content, final, ""); err != nil {
+		u.plugin.API.LogError("Failed to update Langflow streaming post", "error", err, "correlation_id", u.correlationID)
+	}
+}
+
+func (u *streamingPostUpdater) complete(content string) (*model.Post, error) {
+	return u.render(content, true, "")
+}
+
+func (u *streamingPostUpdater) fail(message string) error {
+	_, err := u.render("", false, message)
+	return err
+}
+
+func (u *streamingPostUpdater) render(content string, completed bool, failure string) (*model.Post, error) {
+	if u == nil || u.post == nil {
+		return nil, fmt.Errorf("streaming post is not initialized")
+	}
+
+	message := buildBotResponseMessage(u.account.Definition.DisplayName, content, u.correlationID, failure == "" && !completed)
+	if failure != "" {
+		message = strings.TrimSpace(fmt.Sprintf(
+			"Langflow flow `%s` failed for `@%s`.\n\n%s\n\n_Correlation ID:_ `%s`",
+			u.account.Definition.FlowID,
+			u.account.Definition.Username,
+			failure,
+			u.correlationID,
+		))
+	}
+	if message == u.lastRendered {
+		return u.post, nil
+	}
+
+	updatedPost := *u.post
+	updatedPost.Message = message
+	updatedPost.Props = clonePostProps(u.post.Props)
+	if updatedPost.Props == nil {
+		updatedPost.Props = map[string]any{}
+	}
+	if failure != "" {
+		updatedPost.Props["langflow_error"] = "true"
+		updatedPost.Props["langflow_stream_status"] = "failed"
+		updatedPost.Props["langflow_streaming"] = "false"
+	} else if completed {
+		updatedPost.Props["langflow_stream_status"] = "completed"
+		updatedPost.Props["langflow_streaming"] = "false"
+	} else {
+		updatedPost.Props["langflow_stream_status"] = "streaming"
+		updatedPost.Props["langflow_streaming"] = "true"
+	}
+
+	post, appErr := u.plugin.API.UpdatePost(&updatedPost)
+	if appErr != nil {
+		return nil, fmt.Errorf("failed to update Langflow streaming post: %w", appErr)
+	}
+
+	u.post = post
+	u.lastRendered = message
+	u.lastUpdateAt = time.Now()
+	return post, nil
+}
+
+func buildBotResponseMessage(displayName, output, correlationID string, streaming bool) string {
+	body := strings.TrimSpace(output)
+	if body == "" && streaming {
+		body = "_Waiting for Langflow to stream a response..._"
+	}
+	if body == "" {
+		body = "_Langflow returned an empty response._"
+	}
+
+	parts := []string{
+		fmt.Sprintf("### %s", displayName),
+		"",
+		body,
+	}
+	if streaming {
+		parts = append(parts, "", "_Streaming response..._")
+	}
+	parts = append(parts, "", fmt.Sprintf("_Correlation ID:_ `%s`", correlationID))
+	return strings.TrimSpace(strings.Join(parts, "\n"))
+}
+
+func buildLangflowSessionID(request BotRunRequest, bot BotDefinition) string {
+	scope := request.RootID
+	if scope == "" {
+		scope = request.ChannelID
+	}
+	if scope == "" {
+		scope = request.UserID
+	}
+	return truncateString(fmt.Sprintf("mattermost:%s:%s:%s", bot.ID, scope, request.UserID), 190)
+}
+
+func clonePostProps(source model.StringInterface) model.StringInterface {
+	if source == nil {
+		return nil
+	}
+	props := make(model.StringInterface, len(source))
+	for key, value := range source {
+		props[key] = value
+	}
+	return props
 }

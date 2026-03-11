@@ -255,7 +255,7 @@ export default function BotDefinitionsSetting(props: CustomSettingProps) {
                     {'Register multiple Mattermost bots here. Each bot is permanently bound to one Langflow flow and can be invoked by DM or @mention.'}
                 </span>
                 <span style={{fontSize: '12px', opacity: 0.8}}>
-                    {'When a bot runs, the plugin calls POST /api/v1/run/$FLOW_ID and sends a JSON body with input_value built from the prompt, optional form fields, and optional conversation context.'}
+                    {'When a bot runs, the plugin calls POST /api/v1/run/$FLOW_ID?stream=true and sends a JSON body with input_value built from the prompt, optional form fields, optional conversation context, and a Mattermost-derived session id.'}
                 </span>
                 <span style={{fontSize: '12px', opacity: 0.8}}>
                     {'After you click Save in the System Console, the plugin creates or updates the matching Mattermost bot accounts automatically.'}
@@ -793,11 +793,12 @@ function buildCurlPreview(bot: DraftBotDefinition) {
     const flowID = bot.flow_id || '$FLOW_ID';
     const username = bot.username || 'bot-username';
     return [
-        `curl -X POST "$LANGFLOW_BASE_URL/api/v1/run/${flowID}" \\`,
+        `curl -X POST "$LANGFLOW_BASE_URL/api/v1/run/${flowID}?stream=true" \\`,
         '  -H "Authorization: Bearer $LANGFLOW_API_KEY" \\',
         '  -H "Content-Type: application/json" \\',
         "  -d '{",
-        `    "input_value": "Hello from @${username}"`,
+        `    "input_value": "Hello from @${username}",`,
+        '    "session_id": "mattermost:bot-id:thread-or-channel:user-id"',
         "  }'",
     ].join('\n');
 }

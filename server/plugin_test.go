@@ -22,3 +22,37 @@ func TestExtractLangflowText(t *testing.T) {
 	body := []byte(`{"outputs":[{"outputs":[{"results":{"message":{"text":"Hello from Langflow"}}}]}]}`)
 	require.Equal(t, "Hello from Langflow", extractLangflowText(body))
 }
+
+func TestParseLangflowStreamJSONLine(t *testing.T) {
+	parser := langflowStreamParser{}
+
+	event, err := parser.parseLine(`{"event":"token","data":{"chunk":"Hello"}}`)
+	require.NoError(t, err)
+	require.NotNil(t, event)
+	require.Equal(t, "token", event.Event)
+	require.Equal(t, "Hello", extractLangflowStreamChunk(event.Data))
+}
+
+func TestParseLangflowStreamSSELine(t *testing.T) {
+	parser := langflowStreamParser{}
+
+	event, err := parser.parseLine(`event: token`)
+	require.NoError(t, err)
+	require.Nil(t, event)
+
+	event, err = parser.parseLine(`data: {"data":{"chunk":"World"}}`)
+	require.NoError(t, err)
+	require.NotNil(t, event)
+	require.Equal(t, "token", event.Event)
+	require.Equal(t, "World", extractLangflowStreamChunk(event.Data))
+}
+
+func TestParseLangflowStreamFallbackJSONPayload(t *testing.T) {
+	parser := langflowStreamParser{}
+
+	event, err := parser.parseLine(`{"outputs":[{"outputs":[{"results":{"message":{"text":"Hello from fallback"}}}]}]}`)
+	require.NoError(t, err)
+	require.NotNil(t, event)
+	require.Equal(t, "end", event.Event)
+	require.Equal(t, "Hello from fallback", extractLangflowTextFromValue(event.Data))
+}

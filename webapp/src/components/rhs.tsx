@@ -113,7 +113,7 @@ export default function RHSPane() {
             setLastResult(result);
             setPrompt('');
             setHistory(await getHistory(5));
-            setMessage(`@${selectedBot.username} posted the result back to Mattermost.`);
+            setMessage(`@${selectedBot.username} posted a bot reply in Mattermost and will stream updates there when enabled.`);
         } catch (error) {
             setMessage((error as Error).message);
         } finally {
@@ -127,7 +127,7 @@ export default function RHSPane() {
                 <div style={{display: 'flex', flexDirection: 'column', gap: '8px'}}>
                     <strong>{'Ask a Langflow Bot'}</strong>
                     <span style={{fontSize: '12px', opacity: 0.8}}>
-                        {'Each bot in this list is bound to a single Langflow flow. Pick a bot, send a prompt, and the selected bot will reply in the channel or thread.'}
+                        {'Each bot in this list is bound to a single Langflow flow. Pick a bot, send a prompt, and the selected bot will stream its reply into the channel or thread when streaming is enabled.'}
                     </span>
                     {loading && <span>{'Loading bots...'}</span>}
                     {!loading && bots.length === 0 && <span>{'No Langflow bots are available in this channel.'}</span>}

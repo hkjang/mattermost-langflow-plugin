@@ -15,6 +15,7 @@ const (
 	defaultMaxInputLength    = 4000
 	defaultMaxOutputLength   = 8000
 	defaultContextPostLimit  = 8
+	defaultStreamIntervalMS  = 350
 	maxHistoryEntriesPerUser = 20
 )
 
@@ -25,27 +26,31 @@ type configuration struct {
 	AllowHosts            string `json:"AllowHosts"`
 	BotDefinitions        string `json:"BotDefinitions"`
 	DefaultTimeoutSeconds string `json:"DefaultTimeoutSeconds"`
+	StreamingUpdateMS     string `json:"StreamingUpdateMS"`
 	MaxInputLength        string `json:"MaxInputLength"`
 	MaxOutputLength       string `json:"MaxOutputLength"`
 	ContextPostLimit      string `json:"ContextPostLimit"`
+	EnableStreaming       bool   `json:"EnableStreaming"`
 	EnableDebugLogs       bool   `json:"EnableDebugLogs"`
 	EnableUsageLogs       bool   `json:"EnableUsageLogs"`
 	StatusPanel           string `json:"StatusPanel"`
 }
 
 type runtimeConfiguration struct {
-	LangflowBaseURL   string
-	ParsedBaseURL     *url.URL
-	LangflowAuthMode  string
-	LangflowAuthToken string
-	AllowHosts        []string
-	BotDefinitions    []BotDefinition
-	DefaultTimeout    time.Duration
-	MaxInputLength    int
-	MaxOutputLength   int
-	ContextPostLimit  int
-	EnableDebugLogs   bool
-	EnableUsageLogs   bool
+	LangflowBaseURL         string
+	ParsedBaseURL           *url.URL
+	LangflowAuthMode        string
+	LangflowAuthToken       string
+	AllowHosts              []string
+	BotDefinitions          []BotDefinition
+	DefaultTimeout          time.Duration
+	StreamingUpdateInterval time.Duration
+	MaxInputLength          int
+	MaxOutputLength         int
+	ContextPostLimit        int
+	EnableStreaming         bool
+	EnableDebugLogs         bool
+	EnableUsageLogs         bool
 }
 
 func (c *configuration) Clone() *configuration {
@@ -58,6 +63,7 @@ func (c *configuration) normalize() (*runtimeConfiguration, error) {
 		LangflowBaseURL:   strings.TrimSpace(c.LangflowBaseURL),
 		LangflowAuthMode:  normalizeAuthMode(c.LangflowAuthMode),
 		LangflowAuthToken: strings.TrimSpace(c.LangflowAuthToken),
+		EnableStreaming:   c.EnableStreaming,
 		MaxInputLength:    parsePositiveInt(c.MaxInputLength, defaultMaxInputLength),
 		MaxOutputLength:   parsePositiveInt(c.MaxOutputLength, defaultMaxOutputLength),
 		ContextPostLimit:  parsePositiveInt(c.ContextPostLimit, defaultContextPostLimit),
@@ -65,6 +71,7 @@ func (c *configuration) normalize() (*runtimeConfiguration, error) {
 		EnableUsageLogs:   c.EnableUsageLogs,
 	}
 	cfg.DefaultTimeout = time.Duration(parsePositiveInt(c.DefaultTimeoutSeconds, defaultTimeoutSeconds)) * time.Second
+	cfg.StreamingUpdateInterval = time.Duration(parsePositiveInt(c.StreamingUpdateMS, defaultStreamIntervalMS)) * time.Millisecond
 
 	if cfg.LangflowBaseURL != "" {
 		parsedURL, err := url.Parse(cfg.LangflowBaseURL)
