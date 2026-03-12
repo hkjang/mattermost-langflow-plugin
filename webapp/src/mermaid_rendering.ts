@@ -1,4 +1,4 @@
-import mermaid from 'mermaid';
+import mermaid from 'mermaid/dist/mermaid.esm.min.mjs';
 
 type MermaidModule = typeof mermaid;
 
@@ -76,7 +76,7 @@ export function splitRenderableMessage(message: string): RenderableMessageSegmen
     ));
 }
 
-export async function renderMermaidDefinition(definition: string, postID: string, index: number) {
+export async function renderMermaidDefinition(definition: string, postID: string, index: number, variant = 'inline') {
     const mermaid = getMermaidModule();
     if (!mermaidInitialized) {
         mermaid.initialize({
@@ -87,16 +87,17 @@ export async function renderMermaidDefinition(definition: string, postID: string
         });
         mermaidInitialized = true;
     }
-    return mermaid.render(buildDiagramID(postID, index), definition);
+    return mermaid.render(buildDiagramID(postID, index, variant), definition);
 }
 
 function getMermaidModule() {
     return mermaid as MermaidModule;
 }
 
-function buildDiagramID(postID: string, index: number) {
+function buildDiagramID(postID: string, index: number, variant: string) {
     const normalized = postID.replace(/[^a-zA-Z0-9_-]/g, '');
-    return `langflow-mermaid-${normalized}-${index}-${Date.now()}`;
+    const normalizedVariant = variant.replace(/[^a-zA-Z0-9_-]/g, '');
+    return `langflow-mermaid-${normalized}-${index}-${normalizedVariant}-${Date.now()}`;
 }
 
 function normalizeMermaidLines(linesText: string) {

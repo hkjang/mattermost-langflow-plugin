@@ -10,42 +10,43 @@ type Props = {
 
 export default function MermaidDiagram({definition, postID, index}: Props) {
     const containerRef = useRef<HTMLDivElement | null>(null);
+    const popupContainerRef = useRef<HTMLDivElement | null>(null);
     const copyResetTimerRef = useRef<number | null>(null);
     const [error, setError] = useState('');
+    const [popupError, setPopupError] = useState('');
     const [copied, setCopied] = useState(false);
     const [showSource, setShowSource] = useState(false);
+    const [showRenderedPopup, setShowRenderedPopup] = useState(false);
 
     useEffect(() => {
-        const container = containerRef.current;
-        if (!container) {
+        return renderIntoContainer({
+            containerRef,
+            definition,
+            postID,
+            index,
+            setError,
+            variant: 'inline',
+        });
+    }, [definition, index, postID]);
+
+    useEffect(() => {
+        if (!showRenderedPopup) {
+            setPopupError('');
+            if (popupContainerRef.current) {
+                popupContainerRef.current.innerHTML = '';
+            }
             return () => undefined;
         }
 
-        let cancelled = false;
-        container.innerHTML = '';
-        setError('');
-
-        renderMermaidDefinition(definition, postID, index).then(({svg, bindFunctions}) => {
-            if (cancelled || !containerRef.current) {
-                return;
-            }
-            containerRef.current.innerHTML = svg;
-            bindFunctions?.(containerRef.current);
-        }).catch((renderError: unknown) => {
-            if (cancelled) {
-                return;
-            }
-            const message = renderError instanceof Error ? renderError.message : String(renderError);
-            setError(message);
+        return renderIntoContainer({
+            containerRef: popupContainerRef,
+            definition,
+            postID,
+            index,
+            setError: setPopupError,
+            variant: 'popup',
         });
-
-        return () => {
-            cancelled = true;
-            if (containerRef.current) {
-                containerRef.current.innerHTML = '';
-            }
-        };
-    }, [definition, index, postID]);
+    }, [definition, index, postID, showRenderedPopup]);
 
     useEffect(() => {
         return () => {
@@ -89,6 +90,13 @@ export default function MermaidDiagram({definition, postID, index}: Props) {
                     >
                         {'원문 보기'}
                     </button>
+                    <button
+                        className='langflow-mermaid-toolbar-button'
+                        onClick={() => setShowRenderedPopup(true)}
+                        type='button'
+                    >
+                        {'렌더 팝업'}
+                    </button>
                 </div>
                 {error && (
                     <div className='langflow-mermaid-error'>
@@ -110,6 +118,57 @@ export default function MermaidDiagram({definition, postID, index}: Props) {
                     </div>
                 )}
             </div>
+            {showRenderedPopup && (
+                <div
+                    className='langflow-mermaid-modal-backdrop'
+                    onClick={() => setShowRenderedPopup(false)}
+                    role='presentation'
+                >
+                    <div
+                        className='langflow-mermaid-modal langflow-mermaid-render-modal'
+                        onClick={(event) => event.stopPropagation()}
+                        role='dialog'
+                    >
+                        <div className='langflow-mermaid-modal-header'>
+                            <strong>{'Mermaid 렌더 팝업'}</strong>
+                            <div className='langflow-mermaid-modal-actions'>
+                                <button
+                                    className='langflow-mermaid-toolbar-button'
+                                    onClick={handleCopy}
+                                    type='button'
+                                >
+                                    {copied ? '복사됨' : '복사'}
+                                </button>
+                                <button
+                                    className='langflow-mermaid-toolbar-button'
+                                    onClick={() => setShowRenderedPopup(false)}
+                                    type='button'
+                                >
+                                    {'닫기'}
+                                </button>
+                            </div>
+                        </div>
+                        {popupError && (
+                            <div className='langflow-mermaid-error langflow-mermaid-modal-error'>
+                                {`Mermaid 렌더링 실패: ${popupError}`}
+                            </div>
+                        )}
+                        <div className='langflow-mermaid-modal-content'>
+                            {popupError ? (
+                                <pre className='post-code langflow-mermaid-source'>
+                                    <code className='language-mermaid'>{definition}</code>
+                                </pre>
+                            ) : (
+                                <div
+                                    className='langflow-mermaid-rendered langflow-mermaid-rendered-popup'
+                                    data-testid='langflow-mermaid-diagram-popup'
+                                    ref={popupContainerRef}
+                                />
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
             {showSource && (
                 <div
                     className='langflow-mermaid-modal-backdrop'
@@ -184,4 +243,52 @@ function legacyCopy(value: string) {
     } finally {
         document.body.removeChild(textarea);
     }
+}
+
+type RenderIntoContainerOptions = {
+    containerRef: React.RefObject<HTMLDivElement>;
+    definition: string;
+    postID: string;
+    index: number;
+    setError: React.Dispatch<React.SetStateAction<string>>;
+    variant: string;
+};
+
+function renderIntoContainer({
+    containerRef,
+    definition,
+    postID,
+    index,
+    setError,
+    variant,
+}: RenderIntoContainerOptions) {
+    const container = containerRef.current;
+    if (!container) {
+        return () => undefined;
+    }
+
+    let cancelled = false;
+    container.innerHTML = '';
+    setError('');
+
+    renderMermaidDefinition(definition, postID, index, variant).then(({svg, bindFunctions}) => {
+        if (cancelled || !containerRef.current) {
+            return;
+        }
+        containerRef.current.innerHTML = svg;
+        bindFunctions?.(containerRef.current);
+    }).catch((renderError: unknown) => {
+        if (cancelled) {
+            return;
+        }
+        const message = renderError instanceof Error ? renderError.message : String(renderError);
+        setError(message);
+    });
+
+    return () => {
+        cancelled = true;
+        if (containerRef.current) {
+            containerRef.current.innerHTML = '';
+        }
+    };
 }

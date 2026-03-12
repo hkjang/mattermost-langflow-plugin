@@ -1,4 +1,4 @@
-jest.mock('mermaid', () => ({
+jest.mock('mermaid/dist/mermaid.esm.min.mjs', () => ({
     __esModule: true,
     default: {
         initialize: jest.fn(),

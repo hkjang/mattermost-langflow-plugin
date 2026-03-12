@@ -186,6 +186,8 @@ func TestBuildLangflowTweaksIncludesMattermostUserContext(t *testing.T) {
 
 	require.Equal(t, "user-id", tweaks["mattermost_user_id"])
 	require.Equal(t, "alice", tweaks["mattermost_user_name"])
+	require.Equal(t, "user-id", tweaks["user_id"])
+	require.Equal(t, "alice", tweaks["username"])
 	require.Equal(t, "high", tweaks["priority"])
 }
 
@@ -242,6 +244,8 @@ func TestNewLangflowRunRequestIncludesChatFields(t *testing.T) {
 	require.Equal(t, "friendly", payload.Tweaks["tone"])
 	require.Equal(t, "mm-user-id", payload.Tweaks["mattermost_user_id"])
 	require.Equal(t, "alice", payload.Tweaks["mattermost_user_name"])
+	require.Equal(t, "mm-user-id", payload.Tweaks["user_id"])
+	require.Equal(t, "alice", payload.Tweaks["username"])
 }
 
 func TestBuildLangflowRunURLPreservesSubpath(t *testing.T) {

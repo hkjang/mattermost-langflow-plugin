@@ -294,6 +294,11 @@ function ensureStreamingStyles() {
     width: min(900px, 100%);
 }
 
+.${markdownBodyClassName} .langflow-mermaid-render-modal {
+    max-width: min(1100px, 100%);
+    width: min(1100px, 100%);
+}
+
 .${markdownBodyClassName} .langflow-mermaid-modal-header {
     align-items: center;
     border-bottom: 1px solid rgba(var(--center-channel-color-rgb), 0.12);
@@ -312,6 +317,20 @@ function ensureStreamingStyles() {
     max-height: calc(80vh - 72px);
     overflow: auto;
     padding: 18px;
+}
+
+.${markdownBodyClassName} .langflow-mermaid-modal-content {
+    max-height: calc(80vh - 72px);
+    overflow: auto;
+    padding: 18px;
+}
+
+.${markdownBodyClassName} .langflow-mermaid-modal-error {
+    margin: 16px 18px 0;
+}
+
+.${markdownBodyClassName} .langflow-mermaid-rendered-popup {
+    min-height: 320px;
 }
 `;
     document.head.appendChild(style);

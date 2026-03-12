@@ -1,6 +1,7 @@
 const exec = require('child_process').exec;
 
 const path = require('path');
+const webpack = require('webpack');
 
 const PLUGIN_ID = require('../plugin.json').id;
 
@@ -85,11 +86,20 @@ const config = {
     output: {
         devtoolNamespace: PLUGIN_ID,
         path: path.join(__dirname, '/dist'),
-        publicPath: '/',
+        publicPath: 'auto',
         filename: 'main.js',
+        chunkFilename: '[name].main.js',
+        clean: true,
+    },
+    optimization: {
+        splitChunks: false,
+        runtimeChunk: false,
     },
     mode: (isDev) ? 'eval-source-map' : 'production',
-    plugins,
+    plugins: [
+        ...plugins,
+        new webpack.optimize.LimitChunkCountPlugin({maxChunks: 1}),
+    ],
 };
 
 if (isDev) {

@@ -368,9 +368,11 @@ func buildLangflowTweaks(request BotRunRequest) map[string]any {
 
 	if request.UserID != "" {
 		tweaks["mattermost_user_id"] = request.UserID
+		tweaks["user_id"] = request.UserID
 	}
 	if request.UserName != "" {
 		tweaks["mattermost_user_name"] = request.UserName
+		tweaks["username"] = request.UserName
 	}
 
 	if len(tweaks) == 0 {
