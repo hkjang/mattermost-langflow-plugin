@@ -1,5 +1,5 @@
 import manifest from 'manifest';
-import React, {useEffect, useMemo, useState} from 'react';
+import React, {useEffect, useMemo, useRef, useState} from 'react';
 
 import type {
     AdminPluginConfig,
@@ -232,6 +232,7 @@ export default function ConfigSetting(props: CustomSettingProps) {
     const [loadingConfig, setLoadingConfig] = useState(true);
     const [loadingStatus, setLoadingStatus] = useState(true);
     const [testingConnection, setTestingConnection] = useState(false);
+    const lastSubmittedValueRef = useRef('');
 
     useEffect(() => {
         let cancelled = false;
@@ -240,12 +241,21 @@ export default function ConfigSetting(props: CustomSettingProps) {
             setLoadingConfig(true);
             setLoadError('');
 
+            const serializedValue = serializeSettingValue(props.value);
+            if (serializedValue && serializedValue === lastSubmittedValueRef.current) {
+                if (!cancelled) {
+                    setLoadingConfig(false);
+                }
+                return;
+            }
+
             const parsedValue = parseStoredConfigValue(props.value);
             if (parsedValue.ok) {
                 if (!cancelled) {
                     setConfig(parsedValue.config);
                     setSource('config');
                     setSelectedBotID((current) => pickSelectedBotID(parsedValue.config.bots, current));
+                    lastSubmittedValueRef.current = serializedValue;
                     setLoadingConfig(false);
                 }
                 return;
@@ -260,6 +270,7 @@ export default function ConfigSetting(props: CustomSettingProps) {
                 setConfig(nextConfig);
                 setSource(response.source || 'config');
                 setSelectedBotID((current) => pickSelectedBotID(nextConfig.bots, current));
+                lastSubmittedValueRef.current = serializeSettingValue(buildStoredConfig(nextConfig));
             } catch (error) {
                 if (!cancelled) {
                     setLoadError((error as Error).message);
@@ -315,7 +326,9 @@ export default function ConfigSetting(props: CustomSettingProps) {
 
     const applyConfig = (nextConfig: DraftPluginConfig, nextSelectedBotID?: string) => {
         setConfig(nextConfig);
-        props.onChange(settingKey, JSON.stringify(buildStoredConfig(nextConfig), null, 2));
+        const nextValue = JSON.stringify(buildStoredConfig(nextConfig), null, 2);
+        lastSubmittedValueRef.current = nextValue;
+        props.onChange(settingKey, nextValue);
         props.setSaveNeeded?.();
 
         if (nextConfig.bots.length === 0) {
@@ -1126,7 +1139,7 @@ function normalizeAdminConfig(value?: AdminPluginConfig): DraftPluginConfig {
     next.runtime.context_post_limit = parseNumber(value.runtime?.context_post_limit, 8);
     next.runtime.enable_debug_logs = Boolean(value.runtime?.enable_debug_logs);
     next.runtime.enable_usage_logs = value.runtime?.enable_usage_logs ?? true;
-    next.bots = Array.isArray(value.bots) ? value.bots.map(normalizeStoredBot) : [];
+    next.bots = Array.isArray(value.bots) ? value.bots.map((bot, index) => normalizeStoredBot(bot, index)) : [];
 
     return next;
 }
@@ -1172,9 +1185,9 @@ function buildStoredConfig(config: DraftPluginConfig): AdminPluginConfig {
     };
 }
 
-function normalizeStoredBot(value: Partial<BotDefinition>): DraftBotDefinition {
+function normalizeStoredBot(value: Partial<BotDefinition>, index = 0): DraftBotDefinition {
     return {
-        local_id: createLocalID('bot'),
+        local_id: createIndexedLocalID('bot', index),
         username: sanitizeUsername(stringValue(value.username)),
         display_name: stringValue(value.display_name),
         description: stringValue(value.description),
@@ -1183,14 +1196,14 @@ function normalizeStoredBot(value: Partial<BotDefinition>): DraftBotDefinition {
         allowed_teams: normalizeStringArray(value.allowed_teams),
         allowed_channels: normalizeStringArray(value.allowed_channels),
         allowed_users: normalizeStringArray(value.allowed_users),
-        input_schema: Array.isArray(value.input_schema) ? value.input_schema.map(normalizeInputField) : [],
+        input_schema: Array.isArray(value.input_schema) ? value.input_schema.map((field, fieldIndex) => normalizeInputField(field, fieldIndex)) : [],
     };
 }
 
-function normalizeInputField(value: NonNullable<BotDefinition['input_schema']>[number]): DraftInputField {
+function normalizeInputField(value: NonNullable<BotDefinition['input_schema']>[number], index = 0): DraftInputField {
     const type = normalizeInputType(stringValue(value?.type));
     return {
-        id: createLocalID('input'),
+        id: createIndexedLocalID('input', index),
         name: stringValue(value?.name),
         label: stringValue(value?.label),
         description: stringValue(value?.description),
@@ -1387,6 +1400,24 @@ function createLocalID(prefix: string) {
     }
 
     return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function createIndexedLocalID(prefix: string, index: number) {
+    return `${prefix}-${index}`;
+}
+
+function serializeSettingValue(value: unknown) {
+    if (value == null || value === '') {
+        return '';
+    }
+    if (typeof value === 'string') {
+        return value;
+    }
+    try {
+        return JSON.stringify(value);
+    } catch {
+        return '';
+    }
 }
 
 function managedBotSummary(bot?: ManagedBotStatus) {
