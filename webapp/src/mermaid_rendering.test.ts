@@ -1,3 +1,11 @@
+jest.mock('mermaid', () => ({
+    __esModule: true,
+    default: {
+        initialize: jest.fn(),
+        render: jest.fn().mockResolvedValue({svg: '<svg></svg>'}),
+    },
+}));
+
 import {containsCompleteMermaidFence, normalizeRenderableMessage, splitRenderableMessage} from './mermaid_rendering';
 
 test('containsCompleteMermaidFence matches only closed mermaid fences', () => {
@@ -64,4 +72,38 @@ test('splitRenderableMessage detects indented mermaid fences after normalization
         {kind: 'text', content: '설명\n'},
         {kind: 'mermaid', content: 'graph TD\nA-->B'},
     ]);
+});
+
+test('normalizeRenderableMessage removes one extra blank line inside fenced code blocks', () => {
+    const normalized = normalizeRenderableMessage([
+        '```python',
+        '',
+        'print("hello")',
+        '',
+        '```',
+    ].join('\n'));
+
+    expect(normalized).toBe([
+        '```python',
+        'print("hello")',
+        '```',
+    ].join('\n'));
+});
+
+test('normalizeRenderableMessage does not rewrite markdown table syntax inside fenced code blocks', () => {
+    const normalized = normalizeRenderableMessage([
+        '```text',
+        '| 이름 | 값 |',
+        '',
+        '| --- | --- |',
+        '```',
+    ].join('\n'));
+
+    expect(normalized).toBe([
+        '```text',
+        '| 이름 | 값 |',
+        '',
+        '| --- | --- |',
+        '```',
+    ].join('\n'));
 });

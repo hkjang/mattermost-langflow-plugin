@@ -189,6 +189,16 @@ func TestBuildLangflowTweaksIncludesMattermostUserContext(t *testing.T) {
 	require.Equal(t, "high", tweaks["priority"])
 }
 
+func TestBuildLangflowMetadataIncludesMattermostUserContext(t *testing.T) {
+	metadata := buildLangflowMetadata(BotRunRequest{
+		UserID:   "user-id",
+		UserName: "alice",
+	})
+
+	require.Equal(t, "user-id", metadata["user_id"])
+	require.Equal(t, "alice", metadata["username"])
+}
+
 func TestNewLangflowRunRequestIncludesChatFields(t *testing.T) {
 	parsedURL, err := url.Parse("https://langflow.example.com")
 	require.NoError(t, err)
@@ -222,6 +232,8 @@ func TestNewLangflowRunRequestIncludesChatFields(t *testing.T) {
 	err = json.NewDecoder(request.Body).Decode(&payload)
 	require.NoError(t, err)
 	require.Equal(t, "사용자 메시지 내용", payload.InputValue)
+	require.Equal(t, "mm-user-id", payload.Metadata["user_id"])
+	require.Equal(t, "alice", payload.Metadata["username"])
 	require.Equal(t, "chat", payload.OutputType)
 	require.Equal(t, "chat", payload.InputType)
 	require.Equal(t, "User", payload.Sender)

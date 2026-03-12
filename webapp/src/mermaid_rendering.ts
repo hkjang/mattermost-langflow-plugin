@@ -1,10 +1,6 @@
-type MermaidModule = {
-    initialize: (config: Record<string, unknown>) => void;
-    render: (id: string, text: string) => Promise<{
-        svg: string;
-        bindFunctions?: (element: Element) => void;
-    }>;
-};
+import mermaid from 'mermaid';
+
+type MermaidModule = typeof mermaid;
 
 export type RenderableMessageSegment = {
     kind: 'text' | 'mermaid';
@@ -13,7 +9,6 @@ export type RenderableMessageSegment = {
 
 const mermaidFencePattern = /```mermaid[\t ]*\n([\s\S]*?)\n```/gi;
 let mermaidInitialized = false;
-let mermaidModule: MermaidModule | null = null;
 
 export function containsCompleteMermaidFence(message: string) {
     return (/```mermaid[\t ]*\n[\s\S]*?\n```/i).test(normalizeRenderableMessage(message));
@@ -21,7 +16,9 @@ export function containsCompleteMermaidFence(message: string) {
 
 export function normalizeRenderableMessage(message: string) {
     const normalizedLines = normalizeMarkdownTableLines(
-        normalizeMermaidLines((message || '').replace(/\r\n/g, '\n')).split('\n'),
+        normalizeFencedCodeBlockLines(
+            normalizeMermaidLines((message || '').replace(/\r\n/g, '\n')).split('\n'),
+        ),
     );
     return normalizedLines.join('\n').replace(/\n{3,}/g, '\n\n');
 }
@@ -94,12 +91,7 @@ export async function renderMermaidDefinition(definition: string, postID: string
 }
 
 function getMermaidModule() {
-    if (!mermaidModule) {
-        // eslint-disable-next-line global-require
-        mermaidModule = require('mermaid/dist/mermaid.js') as MermaidModule;
-    }
-
-    return mermaidModule;
+    return mermaid as MermaidModule;
 }
 
 function buildDiagramID(postID: string, index: number) {
@@ -144,12 +136,77 @@ function normalizeMermaidLines(linesText: string) {
     return normalized.join('\n');
 }
 
+function normalizeFencedCodeBlockLines(lines: string[]) {
+    const normalized: string[] = [];
+    let inFence = false;
+    let fenceMarker = '';
+    let firstFenceLine = false;
+
+    for (const line of lines) {
+        if (!inFence) {
+            const openingFence = matchFenceOpening(line);
+            if (openingFence) {
+                inFence = true;
+                fenceMarker = openingFence;
+                firstFenceLine = true;
+                normalized.push(line.trimEnd());
+                continue;
+            }
+
+            normalized.push(line);
+            continue;
+        }
+
+        if (isFenceClosing(line, fenceMarker)) {
+            if (normalized.length > 0 && normalized[normalized.length - 1].trim() === '') {
+                normalized.pop();
+            }
+
+            inFence = false;
+            fenceMarker = '';
+            firstFenceLine = false;
+            normalized.push(line.trimEnd());
+            continue;
+        }
+
+        if (firstFenceLine && line.trim() === '') {
+            firstFenceLine = false;
+            continue;
+        }
+
+        firstFenceLine = false;
+        normalized.push(line);
+    }
+
+    return normalized;
+}
+
 function normalizeMarkdownTableLines(lines: string[]) {
-    const compacted = lines.map((line) => line.replace(/^\s+(?=\|)/, ''));
+    const compacted = compactMarkdownTableIndentation(lines);
     const withoutInnerBlanks: string[] = [];
+    let inFence = false;
+    let fenceMarker = '';
 
     for (let index = 0; index < compacted.length; index++) {
         const line = compacted[index];
+        if (!inFence) {
+            const openingFence = matchFenceOpening(line);
+            if (openingFence) {
+                inFence = true;
+                fenceMarker = openingFence;
+                withoutInnerBlanks.push(line);
+                continue;
+            }
+        } else if (isFenceClosing(line, fenceMarker)) {
+            inFence = false;
+            fenceMarker = '';
+            withoutInnerBlanks.push(line);
+            continue;
+        } else {
+            withoutInnerBlanks.push(line);
+            continue;
+        }
+
         if (line.trim() !== '') {
             withoutInnerBlanks.push(line);
             continue;
@@ -168,8 +225,28 @@ function normalizeMarkdownTableLines(lines: string[]) {
     }
 
     const normalized: string[] = [];
+    inFence = false;
+    fenceMarker = '';
     for (let index = 0; index < withoutInnerBlanks.length; index++) {
         const line = withoutInnerBlanks[index];
+        if (!inFence) {
+            const openingFence = matchFenceOpening(line);
+            if (openingFence) {
+                inFence = true;
+                fenceMarker = openingFence;
+                normalized.push(line);
+                continue;
+            }
+        } else if (isFenceClosing(line, fenceMarker)) {
+            inFence = false;
+            fenceMarker = '';
+            normalized.push(line);
+            continue;
+        } else {
+            normalized.push(line);
+            continue;
+        }
+
         const previous = normalized[normalized.length - 1] || '';
         const previousIsTable = isMarkdownTableLine(previous);
         const currentIsTable = isMarkdownTableLine(line);
@@ -183,6 +260,36 @@ function normalizeMarkdownTableLines(lines: string[]) {
         }
 
         normalized.push(line);
+    }
+
+    return normalized;
+}
+
+function compactMarkdownTableIndentation(lines: string[]) {
+    const normalized: string[] = [];
+    let inFence = false;
+    let fenceMarker = '';
+
+    for (const line of lines) {
+        if (!inFence) {
+            const openingFence = matchFenceOpening(line);
+            if (openingFence) {
+                inFence = true;
+                fenceMarker = openingFence;
+                normalized.push(line);
+                continue;
+            }
+        } else if (isFenceClosing(line, fenceMarker)) {
+            inFence = false;
+            fenceMarker = '';
+            normalized.push(line);
+            continue;
+        } else {
+            normalized.push(line);
+            continue;
+        }
+
+        normalized.push(line.replace(/^\s+(?=\|)/, ''));
     }
 
     return normalized;
@@ -215,4 +322,22 @@ function findNextNonEmptyIndex(lines: string[], startIndex: number) {
         }
     }
     return -1;
+}
+
+function matchFenceOpening(line: string) {
+    const match = line.match(/^\s*(`{3,}|~{3,})/);
+    return match?.[1] || '';
+}
+
+function isFenceClosing(line: string, fenceMarker: string) {
+    if (!fenceMarker) {
+        return false;
+    }
+
+    const escapedMarker = escapeForRegularExpression(fenceMarker);
+    return new RegExp(`^\\s*${escapedMarker}\\s*$`).test(line);
+}
+
+function escapeForRegularExpression(value: string) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

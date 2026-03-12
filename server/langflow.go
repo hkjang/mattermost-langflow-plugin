@@ -18,6 +18,7 @@ import (
 
 type langflowRunPayload struct {
 	InputValue string         `json:"input_value"`
+	Metadata   map[string]any `json:"metadata,omitempty"`
 	OutputType string         `json:"output_type,omitempty"`
 	InputType  string         `json:"input_type,omitempty"`
 	Tweaks     map[string]any `json:"tweaks,omitempty"`
@@ -308,6 +309,7 @@ func (p *Plugin) newLangflowRunRequest(
 
 	payload := langflowRunPayload{
 		InputValue: prompt,
+		Metadata:   buildLangflowMetadata(requestContext),
 		OutputType: "chat",
 		InputType:  "chat",
 		Tweaks:     buildLangflowTweaks(requestContext),
@@ -340,6 +342,22 @@ func (p *Plugin) newLangflowRunRequest(
 	p.applyAuthHeader(request, cfg)
 
 	return request, nil
+}
+
+func buildLangflowMetadata(request BotRunRequest) map[string]any {
+	metadata := map[string]any{}
+	if request.UserID != "" {
+		metadata["user_id"] = request.UserID
+	}
+	if request.UserName != "" {
+		metadata["username"] = request.UserName
+	}
+
+	if len(metadata) == 0 {
+		return nil
+	}
+
+	return metadata
 }
 
 func buildLangflowTweaks(request BotRunRequest) map[string]any {

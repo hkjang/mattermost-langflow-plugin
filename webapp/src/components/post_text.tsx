@@ -218,13 +218,48 @@ function ensureStreamingStyles() {
 }
 
 .${markdownBodyClassName} .langflow-mermaid-rendered {
+    min-height: 48px;
+    overflow-x: auto;
+}
+
+.${markdownBodyClassName} .langflow-mermaid-card {
     background: rgba(var(--center-channel-color-rgb), 0.03);
     border: 1px solid rgba(var(--center-channel-color-rgb), 0.12);
     border-radius: 12px;
     margin: 12px 0;
     max-width: 100%;
-    overflow-x: auto;
     padding: 12px;
+    position: relative;
+}
+
+.${markdownBodyClassName} .langflow-mermaid-toolbar {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-bottom: 8px;
+}
+
+.${markdownBodyClassName} .langflow-mermaid-toolbar-button {
+    background: rgba(var(--center-channel-color-rgb), 0.08);
+    border: 1px solid rgba(var(--center-channel-color-rgb), 0.14);
+    border-radius: 999px;
+    color: inherit;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
+    padding: 6px 10px;
+}
+
+.${markdownBodyClassName} .langflow-mermaid-toolbar-button:hover {
+    background: rgba(var(--center-channel-color-rgb), 0.12);
+}
+
+.${markdownBodyClassName} .langflow-mermaid-error {
+    color: var(--dnd-indicator);
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 8px;
 }
 
 .${markdownBodyClassName} .langflow-mermaid-rendered svg {
@@ -235,7 +270,48 @@ function ensureStreamingStyles() {
 }
 
 .${markdownBodyClassName} .langflow-mermaid-fallback {
-    margin: 12px 0;
+    margin: 0;
+}
+
+.${markdownBodyClassName} .langflow-mermaid-modal-backdrop {
+    align-items: center;
+    background: rgba(0, 0, 0, 0.48);
+    display: flex;
+    inset: 0;
+    justify-content: center;
+    padding: 20px;
+    position: fixed;
+    z-index: 1000;
+}
+
+.${markdownBodyClassName} .langflow-mermaid-modal {
+    background: var(--center-channel-bg);
+    border-radius: 16px;
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.24);
+    max-height: min(80vh, 720px);
+    max-width: min(900px, 100%);
+    overflow: hidden;
+    width: min(900px, 100%);
+}
+
+.${markdownBodyClassName} .langflow-mermaid-modal-header {
+    align-items: center;
+    border-bottom: 1px solid rgba(var(--center-channel-color-rgb), 0.12);
+    display: flex;
+    justify-content: space-between;
+    padding: 16px 18px;
+}
+
+.${markdownBodyClassName} .langflow-mermaid-modal-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.${markdownBodyClassName} .langflow-mermaid-source {
+    margin: 0;
+    max-height: calc(80vh - 72px);
+    overflow: auto;
+    padding: 18px;
 }
 `;
     document.head.appendChild(style);
