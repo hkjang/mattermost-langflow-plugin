@@ -13,12 +13,14 @@ import (
 
 func TestParseBotDefinitions(t *testing.T) {
 	bots, err := parseBotDefinitions(`[
-		{"id":"support","username":"support-bot","display_name":"Support","flow_id":"support","input_schema":[{"name":"tone","type":"text"}]},
+		{"id":"support","username":"support-bot","display_name":"Support","flow_id":"support","file_component_id":"ReadFile-a1","image_component_id":"ChatInput-b2","input_schema":[{"name":"tone","type":"text"}]},
 		{"id":"summary","username":"summary-bot","display_name":"Thread Summary","flow_id":"thread-summary"}
 	]`)
 	require.NoError(t, err)
 	require.Len(t, bots, 2)
 	require.Equal(t, "support", bots[0].ID)
+	require.Equal(t, "ReadFile-a1", bots[0].FileComponentID)
+	require.Equal(t, "ChatInput-b2", bots[0].ImageComponentID)
 	require.Equal(t, "summary-bot", bots[1].Username)
 	require.Equal(t, "thread-summary", bots[1].FlowID)
 }
@@ -189,6 +191,34 @@ func TestBuildLangflowTweaksIncludesMattermostUserContext(t *testing.T) {
 	require.Equal(t, "user-id", tweaks["user_id"])
 	require.Equal(t, "alice", tweaks["username"])
 	require.Equal(t, "high", tweaks["priority"])
+}
+
+func TestMergeLangflowComponentSetting(t *testing.T) {
+	tweaks := mergeLangflowComponentSetting(map[string]any{
+		"ReadFile-a1": map[string]any{
+			"keep": true,
+		},
+	}, "ReadFile-a1", "path", []string{"/tmp/a.pdf"})
+
+	component, ok := tweaks["ReadFile-a1"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, true, component["keep"])
+	require.Equal(t, []string{"/tmp/a.pdf"}, component["path"])
+}
+
+func TestMergeLangflowMetadataAddsAttachments(t *testing.T) {
+	metadata := mergeLangflowMetadata(buildLangflowMetadata(BotRunRequest{
+		UserID:   "user-id",
+		UserName: "alice",
+	}), map[string]any{
+		"mattermost_attachments": []map[string]any{{
+			"name": "spec.pdf",
+		}},
+	})
+
+	require.Equal(t, "user-id", metadata["user_id"])
+	require.Equal(t, "alice", metadata["username"])
+	require.Len(t, metadata["mattermost_attachments"], 1)
 }
 
 func TestBuildLangflowMetadataIncludesMattermostUserContext(t *testing.T) {

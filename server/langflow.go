@@ -22,6 +22,7 @@ type langflowRunPayload struct {
 	OutputType string         `json:"output_type,omitempty"`
 	InputType  string         `json:"input_type,omitempty"`
 	Tweaks     map[string]any `json:"tweaks,omitempty"`
+	Files      []string       `json:"files,omitempty"`
 	Sender     string         `json:"sender,omitempty"`
 	SenderName string         `json:"sender_name,omitempty"`
 	SessionID  string         `json:"session_id,omitempty"`
@@ -307,12 +308,26 @@ func (p *Plugin) newLangflowRunRequest(
 		return nil, fmt.Errorf("Langflow host %q is not allowed by configuration", cfg.ParsedBaseURL.Hostname())
 	}
 
+	preparedAttachments, err := p.prepareLangflowAttachments(ctx, cfg, bot, requestContext, correlationID)
+	if err != nil {
+		return nil, err
+	}
+
+	metadata := buildLangflowMetadata(requestContext)
+	tweaks := buildLangflowTweaks(requestContext)
+	if preparedAttachments != nil {
+		metadata = mergeLangflowMetadata(metadata, map[string]any{
+			"mattermost_attachments": preparedAttachments.Metadata,
+		})
+		tweaks = mergeLangflowTweaks(tweaks, preparedAttachments.Tweaks)
+	}
+
 	payload := langflowRunPayload{
 		InputValue: prompt,
-		Metadata:   buildLangflowMetadata(requestContext),
+		Metadata:   metadata,
 		OutputType: "chat",
 		InputType:  "chat",
-		Tweaks:     buildLangflowTweaks(requestContext),
+		Tweaks:     tweaks,
 		Sender:     "User",
 		SenderName: defaultIfEmpty(strings.TrimSpace(requestContext.UserName), "User"),
 		SessionID:  sessionID,
@@ -380,6 +395,57 @@ func buildLangflowTweaks(request BotRunRequest) map[string]any {
 	}
 
 	return tweaks
+}
+
+func mergeLangflowMetadata(base map[string]any, additions map[string]any) map[string]any {
+	if len(additions) == 0 {
+		return base
+	}
+	if base == nil {
+		base = map[string]any{}
+	}
+	for key, value := range additions {
+		if value == nil {
+			continue
+		}
+		base[key] = value
+	}
+	if len(base) == 0 {
+		return nil
+	}
+	return base
+}
+
+func mergeLangflowTweaks(base map[string]any, additions map[string]any) map[string]any {
+	if len(additions) == 0 {
+		return base
+	}
+	if base == nil {
+		base = map[string]any{}
+	}
+	for key, value := range additions {
+		if value == nil {
+			continue
+		}
+		existingMap, hasExistingMap := base[key].(map[string]any)
+		addedMap, hasAddedMap := value.(map[string]any)
+		if hasExistingMap && hasAddedMap {
+			merged := map[string]any{}
+			for nestedKey, nestedValue := range existingMap {
+				merged[nestedKey] = nestedValue
+			}
+			for nestedKey, nestedValue := range addedMap {
+				merged[nestedKey] = nestedValue
+			}
+			base[key] = merged
+			continue
+		}
+		base[key] = value
+	}
+	if len(base) == 0 {
+		return nil
+	}
+	return base
 }
 
 func buildLangflowRunURL(baseURL *url.URL, flowID string, stream bool) (*url.URL, error) {

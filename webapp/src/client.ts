@@ -22,6 +22,8 @@ export type BotDefinition = {
     display_name: string;
     description?: string;
     flow_id: string;
+    file_component_id?: string;
+    image_component_id?: string;
     include_context_by_default?: boolean;
     allowed_teams?: string[];
     allowed_channels?: string[];
@@ -181,6 +183,7 @@ export async function runBot(payload: {
     prompt: string;
     include_context: boolean;
     inputs: Record<string, unknown>;
+    file_ids?: string[];
 }) {
     return request<BotRunResult>('/run', {
         method: 'POST',

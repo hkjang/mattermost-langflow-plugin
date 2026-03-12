@@ -19,6 +19,7 @@ type runBotAPIRequest struct {
 	Prompt         string         `json:"prompt"`
 	IncludeContext bool           `json:"include_context"`
 	Inputs         map[string]any `json:"inputs"`
+	FileIDs        []string       `json:"file_ids,omitempty"`
 }
 
 type pluginStatusResponse struct {
@@ -176,6 +177,7 @@ func (p *Plugin) handleRunBot(w http.ResponseWriter, r *http.Request) {
 		Prompt:         request.Prompt,
 		IncludeContext: request.IncludeContext,
 		Inputs:         request.Inputs,
+		FileIDs:        request.FileIDs,
 		Source:         "webapp",
 	})
 	if err != nil {

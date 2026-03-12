@@ -143,6 +143,7 @@ func (p *Plugin) handlePostedMessage(post *model.Post) error {
 		RootID:         responseRootID(post),
 		Prompt:         prompt,
 		IncludeContext: bot.IncludeContextByDefault,
+		FileIDs:        append([]string{}, post.FileIds...),
 		Source:         "message",
 		TriggerPostID:  post.Id,
 		Inputs:         map[string]any{},
@@ -215,6 +216,9 @@ func buildBotPromptMessage(bot BotDefinition) string {
 	lines = append(lines, botUsageExamples(bot)...)
 	if bot.Description != "" {
 		lines = append(lines, "", bot.Description)
+	}
+	if bot.FileComponentID != "" || bot.ImageComponentID != "" {
+		lines = append(lines, "", "파일이나 이미지를 메시지와 함께 첨부하면 Langflow flow로 같이 전달합니다.")
 	}
 	return strings.Join(lines, "\n")
 }

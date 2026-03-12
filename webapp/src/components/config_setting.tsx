@@ -29,6 +29,8 @@ type DraftBotDefinition = {
     display_name: string;
     description: string;
     flow_id: string;
+    file_component_id: string;
+    image_component_id: string;
     include_context_by_default: boolean;
     allowed_teams: string[];
     allowed_channels: string[];
@@ -191,6 +193,8 @@ const sampleBots: BotDefinition[] = [
         display_name: '스레드 요약 봇',
         description: '현재 스레드를 요약하고 액션 아이템을 정리합니다.',
         flow_id: 'thread-summary',
+        file_component_id: 'ReadFile-Lm92a',
+        image_component_id: '',
         include_context_by_default: true,
         allowed_teams: ['engineering'],
         allowed_channels: ['town-square'],
@@ -211,6 +215,8 @@ const sampleBots: BotDefinition[] = [
         display_name: '지원 도우미',
         description: 'Langflow의 고객지원 flow를 호출하는 봇입니다.',
         flow_id: 'support-assistant',
+        file_component_id: 'ReadFile-9x3dA',
+        image_component_id: 'ChatInput-b82Qf',
         include_context_by_default: true,
         allowed_teams: [],
         allowed_channels: [],
@@ -649,6 +655,37 @@ export default function ConfigSetting(props: CustomSettingProps) {
                                     </LabeledField>
                                 </div>
 
+                                <div style={gridTwoStyle}>
+                                    <LabeledField label={'문서 파일 컴포넌트 ID'}>
+                                        <div style={{display: 'flex', flexDirection: 'column', gap: '8px'}}>
+                                            <input
+                                                disabled={disabled}
+                                                onChange={(event) => updateBot(selectedBot.local_id, (bot) => ({...bot, file_component_id: event.target.value}))}
+                                                placeholder={'ReadFile-abc123'}
+                                                style={fieldStyle}
+                                                value={selectedBot.file_component_id}
+                                            />
+                                            <span style={{fontSize: '12px', opacity: 0.8}}>
+                                                {'PDF, DOCX, TXT 같은 일반 첨부 파일은 Langflow /api/v2/files 로 업로드한 뒤 이 컴포넌트의 path tweak로 전달합니다.'}
+                                            </span>
+                                        </div>
+                                    </LabeledField>
+                                    <LabeledField label={'이미지 컴포넌트 ID'}>
+                                        <div style={{display: 'flex', flexDirection: 'column', gap: '8px'}}>
+                                            <input
+                                                disabled={disabled}
+                                                onChange={(event) => updateBot(selectedBot.local_id, (bot) => ({...bot, image_component_id: event.target.value}))}
+                                                placeholder={'ChatInput-xyz789'}
+                                                style={fieldStyle}
+                                                value={selectedBot.image_component_id}
+                                            />
+                                            <span style={{fontSize: '12px', opacity: 0.8}}>
+                                                {'PNG, JPG 같은 이미지는 Langflow /api/v1/files/upload/{flow_id} 후 이 컴포넌트의 files tweak로 전달합니다. 보통 Chat Input 컴포넌트 ID를 넣습니다.'}
+                                            </span>
+                                        </div>
+                                    </LabeledField>
+                                </div>
+
                                 <LabeledField label={'설명'}>
                                     <textarea
                                         disabled={disabled}
@@ -693,6 +730,9 @@ export default function ConfigSetting(props: CustomSettingProps) {
                                 <div style={{...infoBoxStyle, background: 'rgba(63, 67, 80, 0.04)', border: '1px solid rgba(63, 67, 80, 0.10)'}}>
                                     <strong>{'호출 미리보기'}</strong>
                                     <pre style={codeStyle}>{buildCurlPreview(config, selectedBot)}</pre>
+                                    <span style={{fontSize: '12px', opacity: 0.8}}>
+                                        {'메시지에 Mattermost 첨부 파일이 있으면 플러그인이 파일을 먼저 Langflow 파일 API로 업로드하고, 위 run API 요청의 tweaks 안에 컴포넌트별 경로를 자동으로 넣습니다.'}
+                                    </span>
                                 </div>
 
                                 <section style={{...sectionStyle, padding: '16px'}}>
@@ -1168,6 +1208,8 @@ function buildStoredConfig(config: DraftPluginConfig): AdminPluginConfig {
             display_name: bot.display_name.trim(),
             description: bot.description.trim(),
             flow_id: bot.flow_id.trim(),
+            file_component_id: bot.file_component_id.trim(),
+            image_component_id: bot.image_component_id.trim(),
             include_context_by_default: bot.include_context_by_default,
             allowed_teams: normalizeStringArray(bot.allowed_teams),
             allowed_channels: normalizeStringArray(bot.allowed_channels),
@@ -1192,6 +1234,8 @@ function normalizeStoredBot(value: Partial<BotDefinition>, index = 0): DraftBotD
         display_name: stringValue(value.display_name),
         description: stringValue(value.description),
         flow_id: stringValue(value.flow_id),
+        file_component_id: stringValue(value.file_component_id),
+        image_component_id: stringValue(value.image_component_id),
         include_context_by_default: value.include_context_by_default ?? true,
         allowed_teams: normalizeStringArray(value.allowed_teams),
         allowed_channels: normalizeStringArray(value.allowed_channels),
@@ -1272,9 +1316,39 @@ function buildCurlPreview(config: DraftPluginConfig, bot: DraftBotDefinition) {
         '  -H "Content-Type: application/json" \\',
         "  -d '{",
         `    "input_value": "Hello from @${bot.username || 'bot-username'}",`,
-        '    "session_id": "mattermost:bot-username:thread-or-channel:user-id"',
+        '    "session_id": "mattermost:bot-username:thread-or-channel:user-id",',
+        '    "metadata": {',
+        '      "user_id": "mattermost-user-id",',
+        '      "username": "mattermost-username"',
+        '    },',
+        `    "tweaks": ${JSON.stringify(buildAttachmentPreviewTweaks(bot), null, 6).replace(/\n/g, '\n    ')}`,
         "  }'",
     ].join('\n');
+}
+
+function buildAttachmentPreviewTweaks(bot: DraftBotDefinition) {
+    const tweaks: Record<string, unknown> = {
+        mattermost_user_id: 'mattermost-user-id',
+        mattermost_user_name: 'mattermost-username',
+        user_id: 'mattermost-user-id',
+        username: 'mattermost-username',
+    };
+
+    if (bot.file_component_id.trim()) {
+        tweaks[bot.file_component_id.trim()] = {
+            path: [
+                '/app/.cache/langflow/uploaded/example.pdf',
+            ],
+        };
+    }
+
+    if (bot.image_component_id.trim()) {
+        tweaks[bot.image_component_id.trim()] = {
+            files: '/app/.cache/langflow/uploaded/example.png',
+        };
+    }
+
+    return tweaks;
 }
 
 function createEmptyBot(): DraftBotDefinition {
@@ -1284,6 +1358,8 @@ function createEmptyBot(): DraftBotDefinition {
         display_name: '',
         description: '',
         flow_id: '',
+        file_component_id: '',
+        image_component_id: '',
         include_context_by_default: true,
         allowed_teams: [],
         allowed_channels: [],

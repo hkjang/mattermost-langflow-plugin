@@ -23,6 +23,7 @@ type BotRunRequest struct {
 	Prompt         string         `json:"prompt"`
 	IncludeContext bool           `json:"include_context"`
 	Inputs         map[string]any `json:"inputs"`
+	FileIDs        []string       `json:"file_ids,omitempty"`
 	Source         string         `json:"source"`
 	TriggerPostID  string         `json:"trigger_post_id"`
 }
@@ -564,7 +565,7 @@ func (p *Plugin) logUsage(cfg *runtimeConfiguration, correlationID string, reque
 	if !cfg.EnableUsageLogs {
 		return
 	}
-	p.API.LogInfo("Langflow execution", "correlation_id", correlationID, "bot_id", bot.ID, "bot_username", bot.Username, "flow_id", bot.FlowID, "user_id", request.UserID, "channel_id", request.ChannelID, "source", request.Source, "status", status, "error", errorMessage)
+	p.API.LogInfo("Langflow execution", "correlation_id", correlationID, "bot_id", bot.ID, "bot_username", bot.Username, "flow_id", bot.FlowID, "user_id", request.UserID, "channel_id", request.ChannelID, "source", request.Source, "status", status, "error", errorMessage, "attachment_count", len(request.FileIDs))
 }
 
 func validateRequestedInputs(bot BotDefinition, inputs map[string]any) error {

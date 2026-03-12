@@ -13,6 +13,8 @@ type BotDefinition struct {
 	DisplayName             string          `json:"display_name"`
 	Description             string          `json:"description"`
 	FlowID                  string          `json:"flow_id"`
+	FileComponentID         string          `json:"file_component_id"`
+	ImageComponentID        string          `json:"image_component_id"`
 	IncludeContextByDefault bool            `json:"include_context_by_default"`
 	AllowedTeams            []string        `json:"allowed_teams"`
 	AllowedChannels         []string        `json:"allowed_channels"`
@@ -36,6 +38,8 @@ func (b BotDefinition) normalize() (BotDefinition, error) {
 	b.DisplayName = strings.TrimSpace(b.DisplayName)
 	b.Description = strings.TrimSpace(b.Description)
 	b.FlowID = strings.TrimSpace(b.FlowID)
+	b.FileComponentID = strings.TrimSpace(b.FileComponentID)
+	b.ImageComponentID = strings.TrimSpace(b.ImageComponentID)
 
 	if b.Username == "" {
 		return BotDefinition{}, fmt.Errorf("bot definition is missing username")
