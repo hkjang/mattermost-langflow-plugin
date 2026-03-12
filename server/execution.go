@@ -17,6 +17,7 @@ import (
 type BotRunRequest struct {
 	BotID          string         `json:"bot_id"`
 	UserID         string         `json:"user_id"`
+	UserName       string         `json:"user_name"`
 	ChannelID      string         `json:"channel_id"`
 	RootID         string         `json:"root_id"`
 	Prompt         string         `json:"prompt"`
@@ -82,6 +83,7 @@ func (p *Plugin) executeBotAndPost(ctx context.Context, request BotRunRequest) (
 	if appErr != nil {
 		return nil, fmt.Errorf("failed to load user: %w", appErr)
 	}
+	request.UserName = user.Username
 	team := p.getTeamForChannel(channel)
 
 	bot := cfg.getBotByID(request.BotID)
@@ -135,9 +137,9 @@ func (p *Plugin) executeBotAndPost(ctx context.Context, request BotRunRequest) (
 	var statusCode int
 	var runErr error
 	if cfg.EnableStreaming {
-		output, statusCode, runErr = p.invokeLangflowStream(ctx, cfg, *bot, prompt, sessionID, correlationID, streamUpdater.update)
+		output, statusCode, runErr = p.invokeLangflowStream(ctx, cfg, *bot, prompt, request, sessionID, correlationID, streamUpdater.update)
 	} else {
-		output, statusCode, runErr = p.invokeLangflow(ctx, cfg, *bot, prompt, sessionID, correlationID)
+		output, statusCode, runErr = p.invokeLangflow(ctx, cfg, *bot, prompt, request, sessionID, correlationID)
 	}
 	completedAt := time.Now()
 	if runErr != nil {

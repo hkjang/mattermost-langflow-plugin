@@ -17,8 +17,13 @@ import (
 )
 
 type langflowRunPayload struct {
-	InputValue string `json:"input_value"`
-	SessionID  string `json:"session_id,omitempty"`
+	InputValue string         `json:"input_value"`
+	OutputType string         `json:"output_type,omitempty"`
+	InputType  string         `json:"input_type,omitempty"`
+	Tweaks     map[string]any `json:"tweaks,omitempty"`
+	Sender     string         `json:"sender,omitempty"`
+	SenderName string         `json:"sender_name,omitempty"`
+	SessionID  string         `json:"session_id,omitempty"`
 }
 
 type langflowConnectionStatus struct {
@@ -91,8 +96,8 @@ func (e *langflowCallError) toConnectionStatus() *langflowConnectionStatus {
 	}
 }
 
-func (p *Plugin) invokeLangflow(ctx context.Context, cfg *runtimeConfiguration, bot BotDefinition, prompt, sessionID, correlationID string) (string, int, error) {
-	request, err := p.newLangflowRunRequest(ctx, cfg, bot, prompt, sessionID, correlationID, false)
+func (p *Plugin) invokeLangflow(ctx context.Context, cfg *runtimeConfiguration, bot BotDefinition, prompt string, requestContext BotRunRequest, sessionID, correlationID string) (string, int, error) {
+	request, err := p.newLangflowRunRequest(ctx, cfg, bot, prompt, requestContext, sessionID, correlationID, false)
 	if err != nil {
 		return "", 0, err
 	}
@@ -135,10 +140,12 @@ func (p *Plugin) invokeLangflowStream(
 	ctx context.Context,
 	cfg *runtimeConfiguration,
 	bot BotDefinition,
-	prompt, sessionID, correlationID string,
+	prompt string,
+	requestContext BotRunRequest,
+	sessionID, correlationID string,
 	onUpdate func(string, bool),
 ) (string, int, error) {
-	request, err := p.newLangflowRunRequest(ctx, cfg, bot, prompt, sessionID, correlationID, true)
+	request, err := p.newLangflowRunRequest(ctx, cfg, bot, prompt, requestContext, sessionID, correlationID, true)
 	if err != nil {
 		return "", 0, err
 	}
@@ -287,7 +294,9 @@ func (p *Plugin) newLangflowRunRequest(
 	ctx context.Context,
 	cfg *runtimeConfiguration,
 	bot BotDefinition,
-	prompt, sessionID, correlationID string,
+	prompt string,
+	requestContext BotRunRequest,
+	sessionID, correlationID string,
 	stream bool,
 ) (*http.Request, error) {
 	if cfg.ParsedBaseURL == nil {
@@ -299,6 +308,11 @@ func (p *Plugin) newLangflowRunRequest(
 
 	payload := langflowRunPayload{
 		InputValue: prompt,
+		OutputType: "chat",
+		InputType:  "chat",
+		Tweaks:     buildLangflowTweaks(requestContext),
+		Sender:     "User",
+		SenderName: defaultIfEmpty(strings.TrimSpace(requestContext.UserName), "User"),
 		SessionID:  sessionID,
 	}
 
@@ -326,6 +340,26 @@ func (p *Plugin) newLangflowRunRequest(
 	p.applyAuthHeader(request, cfg)
 
 	return request, nil
+}
+
+func buildLangflowTweaks(request BotRunRequest) map[string]any {
+	tweaks := map[string]any{}
+	for key, value := range request.Inputs {
+		tweaks[key] = value
+	}
+
+	if request.UserID != "" {
+		tweaks["mattermost_user_id"] = request.UserID
+	}
+	if request.UserName != "" {
+		tweaks["mattermost_user_name"] = request.UserName
+	}
+
+	if len(tweaks) == 0 {
+		return nil
+	}
+
+	return tweaks
 }
 
 func buildLangflowRunURL(baseURL *url.URL, flowID string, stream bool) (*url.URL, error) {

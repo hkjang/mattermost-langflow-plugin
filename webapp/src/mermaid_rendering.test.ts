@@ -1,4 +1,4 @@
-import {containsCompleteMermaidFence, splitRenderableMessage} from './mermaid_rendering';
+import {containsCompleteMermaidFence, normalizeRenderableMessage, splitRenderableMessage} from './mermaid_rendering';
 
 test('containsCompleteMermaidFence matches only closed mermaid fences', () => {
     expect(containsCompleteMermaidFence('```mermaid\ngraph TD\nA-->B\n```')).toBe(true);
@@ -25,4 +25,43 @@ test('splitRenderableMessage separates text and mermaid segments', () => {
 test('splitRenderableMessage keeps plain text when mermaid fence is incomplete', () => {
     const message = '```mermaid\ngraph TD\nA-->B';
     expect(splitRenderableMessage(message)).toEqual([{kind: 'text', content: message}]);
+});
+
+test('normalizeRenderableMessage removes blank lines inside markdown tables', () => {
+    const normalized = normalizeRenderableMessage([
+        '표입니다.',
+        '',
+        '    | 이름 | 값 |',
+        '',
+        '    | --- | --- |',
+        '',
+        '    | A | 1 |',
+        '',
+        '다음 문장',
+    ].join('\n'));
+
+    expect(normalized).toBe([
+        '표입니다.',
+        '',
+        '| 이름 | 값 |',
+        '| --- | --- |',
+        '| A | 1 |',
+        '',
+        '다음 문장',
+    ].join('\n'));
+});
+
+test('splitRenderableMessage detects indented mermaid fences after normalization', () => {
+    const segments = splitRenderableMessage([
+        '설명',
+        '    ```mermaid',
+        '    graph TD',
+        '    A-->B',
+        '    ```',
+    ].join('\n'));
+
+    expect(segments).toEqual([
+        {kind: 'text', content: '설명\n'},
+        {kind: 'mermaid', content: 'graph TD\nA-->B'},
+    ]);
 });

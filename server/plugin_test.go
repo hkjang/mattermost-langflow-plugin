@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"net/url"
 	"strings"
 	"testing"
@@ -172,6 +173,63 @@ func TestStripLeadingLangflowLabel(t *testing.T) {
 	require.Equal(t, "실제 응답", stripLeadingLangflowLabel("### Langflow\n\n실제 응답"))
 	require.Equal(t, "실제 응답", stripLeadingLangflowLabel("langflow\n실제 응답"))
 	require.Equal(t, "실제 응답", stripLeadingLangflowLabel("**Langflow**\n실제 응답"))
+}
+
+func TestBuildLangflowTweaksIncludesMattermostUserContext(t *testing.T) {
+	tweaks := buildLangflowTweaks(BotRunRequest{
+		UserID:   "user-id",
+		UserName: "alice",
+		Inputs: map[string]any{
+			"priority": "high",
+		},
+	})
+
+	require.Equal(t, "user-id", tweaks["mattermost_user_id"])
+	require.Equal(t, "alice", tweaks["mattermost_user_name"])
+	require.Equal(t, "high", tweaks["priority"])
+}
+
+func TestNewLangflowRunRequestIncludesChatFields(t *testing.T) {
+	parsedURL, err := url.Parse("https://langflow.example.com")
+	require.NoError(t, err)
+
+	plugin := &Plugin{}
+	cfg := &runtimeConfiguration{
+		ParsedBaseURL:     parsedURL,
+		LangflowAuthMode:  "bearer",
+		LangflowAuthToken: "secret",
+	}
+
+	request, err := plugin.newLangflowRunRequest(
+		context.Background(),
+		cfg,
+		BotDefinition{FlowID: "support-flow"},
+		"사용자 메시지 내용",
+		BotRunRequest{
+			UserID:   "mm-user-id",
+			UserName: "alice",
+			Inputs: map[string]any{
+				"tone": "friendly",
+			},
+		},
+		"session-123",
+		"corr-123",
+		true,
+	)
+	require.NoError(t, err)
+
+	var payload langflowRunPayload
+	err = json.NewDecoder(request.Body).Decode(&payload)
+	require.NoError(t, err)
+	require.Equal(t, "사용자 메시지 내용", payload.InputValue)
+	require.Equal(t, "chat", payload.OutputType)
+	require.Equal(t, "chat", payload.InputType)
+	require.Equal(t, "User", payload.Sender)
+	require.Equal(t, "alice", payload.SenderName)
+	require.Equal(t, "session-123", payload.SessionID)
+	require.Equal(t, "friendly", payload.Tweaks["tone"])
+	require.Equal(t, "mm-user-id", payload.Tweaks["mattermost_user_id"])
+	require.Equal(t, "alice", payload.Tweaks["mattermost_user_name"])
 }
 
 func TestBuildLangflowRunURLPreservesSubpath(t *testing.T) {
