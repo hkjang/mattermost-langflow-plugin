@@ -22,6 +22,9 @@ func main() {
 	}
 
 	pluginDir := filepath.Join("dist", manifest.Id)
+	if err := writeManifest(pluginDir, manifest); err != nil {
+		panic("failed to sync manifest into dist directory: " + err.Error())
+	}
 	bundlePath := filepath.Join("dist", fmt.Sprintf("%s-%s.tar.gz", manifest.Id, manifest.Version))
 	if err := packagePlugin(pluginDir, bundlePath); err != nil {
 		panic("failed to package plugin bundle: " + err.Error())
@@ -47,6 +50,26 @@ func findManifest() (*model.Manifest, error) {
 	}
 
 	return &manifest, nil
+}
+
+func writeManifest(pluginDir string, manifest *model.Manifest) error {
+	if manifest == nil {
+		return errors.New("manifest is nil")
+	}
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		return errors.Wrap(err, "failed to create dist plugin directory")
+	}
+
+	manifestBytes, err := json.MarshalIndent(manifest, "", "    ")
+	if err != nil {
+		return errors.Wrap(err, "failed to encode manifest for dist")
+	}
+
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.json"), manifestBytes, 0o644); err != nil {
+		return errors.Wrap(err, "failed to write dist plugin manifest")
+	}
+
+	return nil
 }
 
 func packagePlugin(pluginDir, bundlePath string) error {
