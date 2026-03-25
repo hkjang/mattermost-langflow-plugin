@@ -8,7 +8,7 @@ const manifest = JSON.parse(`
     "homepage_url": "https://github.com/hkjang/mattermost-langflow-plugin",
     "support_url": "https://github.com/hkjang/mattermost-langflow-plugin/issues",
     "icon_path": "assets/starter-template-icon.svg",
-    "version": "0.1.19",
+    "version": "0.1.20",
     "min_server_version": "10.0.0",
     "server": {
         "executables": {

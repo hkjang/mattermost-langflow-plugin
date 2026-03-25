@@ -22,8 +22,8 @@ func main() {
 	}
 
 	pluginDir := filepath.Join("dist", manifest.Id)
-	if err := writeManifest(pluginDir, manifest); err != nil {
-		panic("failed to sync manifest into dist directory: " + err.Error())
+	if err := stagePluginFiles(pluginDir, manifest); err != nil {
+		panic("failed to stage plugin files: " + err.Error())
 	}
 	bundlePath := filepath.Join("dist", fmt.Sprintf("%s-%s.tar.gz", manifest.Id, manifest.Version))
 	if err := packagePlugin(pluginDir, bundlePath); err != nil {
@@ -52,9 +52,12 @@ func findManifest() (*model.Manifest, error) {
 	return &manifest, nil
 }
 
-func writeManifest(pluginDir string, manifest *model.Manifest) error {
+func stagePluginFiles(pluginDir string, manifest *model.Manifest) error {
 	if manifest == nil {
 		return errors.New("manifest is nil")
+	}
+	if err := os.RemoveAll(pluginDir); err != nil {
+		return errors.Wrap(err, "failed to reset dist plugin directory")
 	}
 	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
 		return errors.Wrap(err, "failed to create dist plugin directory")
@@ -67,6 +70,80 @@ func writeManifest(pluginDir string, manifest *model.Manifest) error {
 
 	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.json"), manifestBytes, 0o644); err != nil {
 		return errors.Wrap(err, "failed to write dist plugin manifest")
+	}
+
+	if err := copyDirIfExists("assets", filepath.Join(pluginDir, "assets")); err != nil {
+		return err
+	}
+	if err := copyDirIfExists("public", filepath.Join(pluginDir, "public")); err != nil {
+		return err
+	}
+	if manifest.HasServer() {
+		if err := copyDirIfExists(filepath.Join("server", "dist"), filepath.Join(pluginDir, "server", "dist")); err != nil {
+			return err
+		}
+	}
+	if manifest.HasWebapp() {
+		if err := copyDirIfExists(filepath.Join("webapp", "dist"), filepath.Join(pluginDir, "webapp", "dist")); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func copyDirIfExists(sourceDir, destinationDir string) error {
+	info, err := os.Stat(sourceDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return errors.Wrapf(err, "failed to stat %s", sourceDir)
+	}
+	if !info.IsDir() {
+		return errors.Errorf("%s is not a directory", sourceDir)
+	}
+
+	return filepath.WalkDir(sourceDir, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+
+		relativePath, err := filepath.Rel(sourceDir, path)
+		if err != nil {
+			return errors.Wrapf(err, "failed to compute relative path for %s", path)
+		}
+		targetPath := filepath.Join(destinationDir, relativePath)
+
+		if entry.IsDir() {
+			if err := os.MkdirAll(targetPath, 0o755); err != nil {
+				return errors.Wrapf(err, "failed to create %s", targetPath)
+			}
+			return nil
+		}
+
+		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+			return errors.Wrapf(err, "failed to create parent directory for %s", targetPath)
+		}
+		return copyFile(path, targetPath)
+	})
+}
+
+func copyFile(sourcePath, destinationPath string) error {
+	sourceFile, err := os.Open(sourcePath) //nolint:gosec
+	if err != nil {
+		return errors.Wrapf(err, "failed to open %s", sourcePath)
+	}
+	defer sourceFile.Close()
+
+	destinationFile, err := os.Create(destinationPath)
+	if err != nil {
+		return errors.Wrapf(err, "failed to create %s", destinationPath)
+	}
+	defer destinationFile.Close()
+
+	if _, err := io.Copy(destinationFile, sourceFile); err != nil {
+		return errors.Wrapf(err, "failed to copy %s to %s", sourcePath, destinationPath)
 	}
 
 	return nil
