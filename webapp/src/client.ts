@@ -22,6 +22,8 @@ export type BotDefinition = {
     display_name: string;
     description?: string;
     flow_id: string;
+    auth_mode?: string;
+    auth_token?: string;
     file_component_id?: string;
     image_component_id?: string;
     include_context_by_default?: boolean;

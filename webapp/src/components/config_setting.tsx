@@ -11,6 +11,7 @@ import type {
 import {getAdminConfig, getStatus, testConnection} from '../client';
 
 type InputFieldType = 'text' | 'textarea' | 'number' | 'bool';
+type DraftBotAuthMode = 'inherit' | 'bearer' | 'x-api-key';
 
 type DraftInputField = {
     id: string;
@@ -29,6 +30,8 @@ type DraftBotDefinition = {
     display_name: string;
     description: string;
     flow_id: string;
+    auth_mode: DraftBotAuthMode;
+    auth_token: string;
     file_component_id: string;
     image_component_id: string;
     include_context_by_default: boolean;
@@ -193,6 +196,7 @@ const sampleBots: BotDefinition[] = [
         display_name: '스레드 요약 봇',
         description: '현재 스레드를 요약하고 액션 아이템을 정리합니다.',
         flow_id: 'thread-summary',
+        auth_mode: 'x-api-key',
         file_component_id: 'ReadFile-Lm92a',
         image_component_id: '',
         include_context_by_default: true,
@@ -215,6 +219,7 @@ const sampleBots: BotDefinition[] = [
         display_name: '지원 도우미',
         description: 'Langflow의 고객지원 flow를 호출하는 봇입니다.',
         flow_id: 'support-assistant',
+        auth_mode: 'inherit',
         file_component_id: 'ReadFile-9x3dA',
         image_component_id: 'ChatInput-b82Qf',
         include_context_by_default: true,
@@ -462,8 +467,13 @@ export default function ConfigSetting(props: CustomSettingProps) {
                 <div style={sectionHeaderStyle}>
                     <div style={sectionTitleStyle}>{'서비스 연결'}</div>
                     <div style={sectionSubtitleStyle}>
-                        {'Langflow 서버 주소와 인증 방식을 지정합니다. 이 값은 모든 봇이 공통으로 사용합니다.'}
+                        {'Langflow 서버 주소와 기본 인증 방식을 지정합니다. 개별 봇은 이 값을 상속하거나 별도 API 키로 덮어쓸 수 있습니다.'}
                     </div>
+                </div>
+                <div style={infoBoxStyle}>
+                    <span>{'Langflow는 기본적으로 x-api-key 인증을 권장합니다.'}</span>
+                    <span>{'Langflow가 LANGFLOW_API_KEY_SOURCE=env 로 실행 중이면 배포 전체에서 하나의 API 키만 허용될 수 있습니다.'}</span>
+                    <span>{'봇마다 다른 키를 쓰려면 Langflow가 DB 기반 API 키 검증을 사용하도록 구성하거나, 봇별로 다른 Langflow 배포를 연결해야 합니다.'}</span>
                 </div>
                 {loadingConfig ? <span>{'설정을 불러오는 중입니다...'}</span> : (
                     <>
@@ -609,6 +619,7 @@ export default function ConfigSetting(props: CustomSettingProps) {
                                     <strong>{selectedBot.display_name || selectedBot.username || '봇 상세 설정'}</strong>
                                     <span>{`이 봇의 내부 식별자는 username(@${selectedBot.username || 'username'})을 기준으로 자동 생성됩니다.`}</span>
                                     <span>{'Mattermost의 실제 bot user id는 저장 후 자동으로 생성되며 아래 상태 섹션에서 확인할 수 있습니다.'}</span>
+                                    <span>{`현재 인증: ${describeBotAuth(selectedBot, config)}`}</span>
                                 </div>
 
                                 <div style={gridTwoStyle}>
@@ -652,6 +663,41 @@ export default function ConfigSetting(props: CustomSettingProps) {
                                             />
                                             {'최근 Mattermost 대화를 기본 컨텍스트로 포함'}
                                         </label>
+                                    </LabeledField>
+                                </div>
+
+                                <div style={gridTwoStyle}>
+                                    <LabeledField label={'봇별 인증 방식'}>
+                                        <div style={{display: 'flex', flexDirection: 'column', gap: '8px'}}>
+                                            <select
+                                                disabled={disabled}
+                                                onChange={(event) => updateBot(selectedBot.local_id, (bot) => ({...bot, auth_mode: normalizeDraftBotAuthMode(event.target.value)}))}
+                                                style={fieldStyle}
+                                                value={selectedBot.auth_mode}
+                                            >
+                                                <option value='inherit'>{'서비스 기본값 사용'}</option>
+                                                <option value='bearer'>{'Bearer 토큰'}</option>
+                                                <option value='x-api-key'>{'x-api-key'}</option>
+                                            </select>
+                                            <span style={{fontSize: '12px', opacity: 0.8}}>
+                                                {'서비스 기본값 사용을 선택하면 상단의 공통 인증 헤더 방식과 토큰을 그대로 상속합니다.'}
+                                            </span>
+                                        </div>
+                                    </LabeledField>
+                                    <LabeledField label={'봇별 API 키 / 토큰'}>
+                                        <div style={{display: 'flex', flexDirection: 'column', gap: '8px'}}>
+                                            <input
+                                                disabled={disabled}
+                                                onChange={(event) => updateBot(selectedBot.local_id, (bot) => ({...bot, auth_token: event.target.value}))}
+                                                placeholder={'비워두면 서비스 기본 토큰 사용'}
+                                                style={fieldStyle}
+                                                type='password'
+                                                value={selectedBot.auth_token}
+                                            />
+                                            <span style={{fontSize: '12px', opacity: 0.8}}>
+                                                {'여기에 값을 넣으면 이 봇만 별도의 API 키 또는 토큰을 사용합니다. 비워두면 서비스 기본 토큰을 사용합니다.'}
+                                            </span>
+                                        </div>
                                     </LabeledField>
                                 </div>
 
@@ -1011,6 +1057,7 @@ export default function ConfigSetting(props: CustomSettingProps) {
                                         >
                                             <strong>{bot.display_name || bot.username}</strong>
                                             <span>{`@${bot.username} -> ${bot.flow_id}`}</span>
+                                            <span>{`인증: ${describeReadonlyBotAuth(bot)}`}</span>
                                             <span>{managedBotSummary(managed)}</span>
                                             {managed?.status_message && <span>{`상태 메모: ${managed.status_message}`}</span>}
                                             {bot.description && <span>{bot.description}</span>}
@@ -1208,6 +1255,8 @@ function buildStoredConfig(config: DraftPluginConfig): AdminPluginConfig {
             display_name: bot.display_name.trim(),
             description: bot.description.trim(),
             flow_id: bot.flow_id.trim(),
+            auth_mode: normalizeStoredBotAuthMode(bot.auth_mode),
+            auth_token: bot.auth_token.trim(),
             file_component_id: bot.file_component_id.trim(),
             image_component_id: bot.image_component_id.trim(),
             include_context_by_default: bot.include_context_by_default,
@@ -1234,6 +1283,8 @@ function normalizeStoredBot(value: Partial<BotDefinition>, index = 0): DraftBotD
         display_name: stringValue(value.display_name),
         description: stringValue(value.description),
         flow_id: stringValue(value.flow_id),
+        auth_mode: normalizeDraftBotAuthMode(stringValue(value.auth_mode)),
+        auth_token: stringValue(value.auth_token),
         file_component_id: stringValue(value.file_component_id),
         image_component_id: stringValue(value.image_component_id),
         include_context_by_default: value.include_context_by_default ?? true,
@@ -1287,6 +1338,10 @@ function validateConfig(config: DraftPluginConfig) {
             messages.push(`${label}: flow ID는 필수입니다.`);
         }
 
+        if (bot.auth_mode !== 'inherit' && !bot.auth_token.trim() && !config.service.auth_token.trim()) {
+            messages.push(`${label}: 봇별 인증 방식을 서비스 기본값이 아닌 값으로 설정했다면 사용할 토큰이 필요합니다.`);
+        }
+
         const seenFields = new Set<string>();
         bot.input_schema.forEach((field, fieldIndex) => {
             const fieldLabel = field.label || field.name || `필드 ${fieldIndex + 1}`;
@@ -1306,9 +1361,11 @@ function validateConfig(config: DraftPluginConfig) {
 
 function buildCurlPreview(config: DraftPluginConfig, bot: DraftBotDefinition) {
     const flowID = bot.flow_id || '$FLOW_ID';
-    const header = config.service.auth_mode === 'x-api-key' ?
-        '  -H "x-api-key: $LANGFLOW_API_KEY" \\' :
-        '  -H "Authorization: Bearer $LANGFLOW_API_KEY" \\';
+    const authMode = effectiveBotAuthMode(config, bot);
+    const authVariable = bot.auth_token.trim() ? '$BOT_LANGFLOW_API_KEY' : '$LANGFLOW_API_KEY';
+    const header = authMode === 'x-api-key' ?
+        `  -H "x-api-key: ${authVariable}" \\` :
+        `  -H "Authorization: Bearer ${authVariable}" \\`;
 
     return [
         `curl -X POST "${config.service.base_url || '$LANGFLOW_BASE_URL'}/api/v1/run/${flowID}?stream=true" \\`,
@@ -1358,6 +1415,8 @@ function createEmptyBot(): DraftBotDefinition {
         display_name: '',
         description: '',
         flow_id: '',
+        auth_mode: 'inherit',
+        auth_token: '',
         file_component_id: '',
         image_component_id: '',
         include_context_by_default: true,
@@ -1396,6 +1455,48 @@ function createEmptyInputField(): DraftInputField {
 
 function normalizeAuthMode(value: string) {
     return value === 'x-api-key' ? 'x-api-key' : 'bearer';
+}
+
+function normalizeDraftBotAuthMode(value: string): DraftBotAuthMode {
+    if (value === 'bearer' || value === 'x-api-key') {
+        return value;
+    }
+    return 'inherit';
+}
+
+function normalizeStoredBotAuthMode(value: DraftBotAuthMode) {
+    if (value === 'inherit') {
+        return '';
+    }
+    return normalizeAuthMode(value);
+}
+
+function effectiveBotAuthMode(config: DraftPluginConfig, bot: DraftBotDefinition) {
+    if (bot.auth_mode !== 'inherit') {
+        return normalizeAuthMode(bot.auth_mode);
+    }
+    return normalizeAuthMode(config.service.auth_mode);
+}
+
+function describeBotAuth(bot: DraftBotDefinition, config: DraftPluginConfig) {
+    const header = effectiveBotAuthMode(config, bot) === 'x-api-key' ? 'x-api-key' : 'Bearer';
+    if (bot.auth_mode === 'inherit' && !bot.auth_token.trim()) {
+        return `서비스 기본값 상속 (${header})`;
+    }
+    if (bot.auth_token.trim()) {
+        return `봇별 토큰 사용 (${header})`;
+    }
+    return `헤더만 봇별 override (${header}, 토큰은 서비스 기본값 사용)`;
+}
+
+function describeReadonlyBotAuth(bot: BotDefinition) {
+    if (bot.auth_mode === 'x-api-key') {
+        return '봇별 x-api-key override';
+    }
+    if (bot.auth_mode === 'bearer') {
+        return '봇별 Bearer override';
+    }
+    return '서비스 기본값 상속';
 }
 
 function normalizeInputType(value: string): InputFieldType {

@@ -34,6 +34,16 @@ func TestParseBotDefinitionsAutoAssignsIDFromUsername(t *testing.T) {
 	require.Equal(t, "summary-bot", bots[0].ID)
 }
 
+func TestParseBotDefinitionsPreservesBotSpecificAuth(t *testing.T) {
+	bots, err := parseBotDefinitions(`[
+		{"username":"secure-bot","display_name":"Secure Bot","flow_id":"secure-flow","auth_mode":"x-api-key","auth_token":"bot-secret"}
+	]`)
+	require.NoError(t, err)
+	require.Len(t, bots, 1)
+	require.Equal(t, "x-api-key", bots[0].AuthMode)
+	require.Equal(t, "bot-secret", bots[0].AuthToken)
+}
+
 func TestConfigurationGetStoredPluginConfigFromLegacy(t *testing.T) {
 	cfg := &configuration{
 		LangflowBaseURL:       "https://langflow.example.com",
@@ -276,6 +286,67 @@ func TestNewLangflowRunRequestIncludesChatFields(t *testing.T) {
 	require.Equal(t, "alice", payload.Tweaks["mattermost_user_name"])
 	require.Equal(t, "mm-user-id", payload.Tweaks["user_id"])
 	require.Equal(t, "alice", payload.Tweaks["username"])
+	require.Equal(t, "Bearer secret", request.Header.Get("Authorization"))
+	require.Empty(t, request.Header.Get("x-api-key"))
+}
+
+func TestNewLangflowRunRequestUsesBotSpecificXAPIKey(t *testing.T) {
+	parsedURL, err := url.Parse("https://langflow.example.com")
+	require.NoError(t, err)
+
+	plugin := &Plugin{}
+	cfg := &runtimeConfiguration{
+		ParsedBaseURL:     parsedURL,
+		LangflowAuthMode:  "bearer",
+		LangflowAuthToken: "service-secret",
+	}
+
+	request, err := plugin.newLangflowRunRequest(
+		context.Background(),
+		cfg,
+		BotDefinition{
+			FlowID:    "support-flow",
+			AuthMode:  "x-api-key",
+			AuthToken: "bot-secret",
+		},
+		"hello",
+		BotRunRequest{},
+		"session-123",
+		"corr-123",
+		true,
+	)
+	require.NoError(t, err)
+	require.Equal(t, "bot-secret", request.Header.Get("x-api-key"))
+	require.Empty(t, request.Header.Get("Authorization"))
+}
+
+func TestNewLangflowRunRequestUsesBotTokenWithInheritedMode(t *testing.T) {
+	parsedURL, err := url.Parse("https://langflow.example.com")
+	require.NoError(t, err)
+
+	plugin := &Plugin{}
+	cfg := &runtimeConfiguration{
+		ParsedBaseURL:     parsedURL,
+		LangflowAuthMode:  "x-api-key",
+		LangflowAuthToken: "service-secret",
+	}
+
+	request, err := plugin.newLangflowRunRequest(
+		context.Background(),
+		cfg,
+		BotDefinition{
+			FlowID:    "support-flow",
+			AuthToken: "bot-secret",
+		},
+		"hello",
+		BotRunRequest{},
+		"session-123",
+		"corr-123",
+		false,
+	)
+	require.NoError(t, err)
+	require.Equal(t, "bot-secret", request.Header.Get("x-api-key"))
+	require.Empty(t, request.Header.Get("Authorization"))
 }
 
 func TestBuildLangflowRunURLPreservesSubpath(t *testing.T) {

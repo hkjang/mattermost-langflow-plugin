@@ -56,6 +56,12 @@ type langflowCallError struct {
 	Retryable  bool
 }
 
+type langflowAuthSettings struct {
+	Mode   string
+	Token  string
+	Source string
+}
+
 func (e *langflowCallError) Error() string {
 	if e == nil {
 		return ""
@@ -354,7 +360,7 @@ func (p *Plugin) newLangflowRunRequest(
 	} else {
 		request.Header.Set("Accept", "application/json")
 	}
-	p.applyAuthHeader(request, cfg)
+	p.applyAuthHeader(request, cfg, &bot)
 
 	return request, nil
 }
@@ -480,7 +486,7 @@ func (p *Plugin) testLangflowConnection(ctx context.Context, cfg *runtimeConfigu
 		if err != nil {
 			return nil, fmt.Errorf("failed to create health request: %w", err)
 		}
-		p.applyAuthHeader(request, cfg)
+		p.applyAuthHeader(request, cfg, nil)
 
 		response, err := client.Do(request)
 		if err != nil {
@@ -525,15 +531,39 @@ func (p *Plugin) testLangflowConnection(ctx context.Context, cfg *runtimeConfigu
 	}, nil
 }
 
-func (p *Plugin) applyAuthHeader(request *http.Request, cfg *runtimeConfiguration) {
-	if cfg.LangflowAuthToken == "" {
+func resolveLangflowAuth(cfg *runtimeConfiguration, bot *BotDefinition) langflowAuthSettings {
+	auth := langflowAuthSettings{
+		Mode:   normalizeAuthMode(cfg.LangflowAuthMode),
+		Token:  strings.TrimSpace(cfg.LangflowAuthToken),
+		Source: "service",
+	}
+
+	if bot == nil {
+		return auth
+	}
+
+	if overrideMode := normalizeBotAuthMode(bot.AuthMode); overrideMode != "" {
+		auth.Mode = overrideMode
+		auth.Source = "bot"
+	}
+	if overrideToken := strings.TrimSpace(bot.AuthToken); overrideToken != "" {
+		auth.Token = overrideToken
+		auth.Source = "bot"
+	}
+
+	return auth
+}
+
+func (p *Plugin) applyAuthHeader(request *http.Request, cfg *runtimeConfiguration, bot *BotDefinition) {
+	auth := resolveLangflowAuth(cfg, bot)
+	if auth.Token == "" {
 		return
 	}
-	if cfg.LangflowAuthMode == "x-api-key" {
-		request.Header.Set("x-api-key", cfg.LangflowAuthToken)
+	if auth.Mode == "x-api-key" {
+		request.Header.Set("x-api-key", auth.Token)
 		return
 	}
-	request.Header.Set("Authorization", "Bearer "+cfg.LangflowAuthToken)
+	request.Header.Set("Authorization", "Bearer "+auth.Token)
 }
 
 func hostAllowed(host string, allowHosts []string) bool {
@@ -1114,7 +1144,7 @@ func classifyLangflowHTTPError(requestURL string, statusCode int, headers http.H
 			"auth_failed",
 			"Langflow 인증에 실패했습니다.",
 			defaultIfEmpty(bodySummary, "Langflow가 토큰 또는 API 키를 허용하지 않았습니다."),
-			"System Console의 인증 모드와 토큰 값을 다시 확인하세요.",
+			"서비스 기본 토큰과 봇별 API 키 오버라이드를 다시 확인하세요. Langflow가 LANGFLOW_API_KEY_SOURCE=env 로 실행 중이면 배포 전체에서 하나의 API 키만 허용됩니다.",
 			requestURL,
 			statusCode,
 			false,

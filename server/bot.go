@@ -13,6 +13,8 @@ type BotDefinition struct {
 	DisplayName             string          `json:"display_name"`
 	Description             string          `json:"description"`
 	FlowID                  string          `json:"flow_id"`
+	AuthMode                string          `json:"auth_mode,omitempty"`
+	AuthToken               string          `json:"auth_token,omitempty"`
 	FileComponentID         string          `json:"file_component_id"`
 	ImageComponentID        string          `json:"image_component_id"`
 	IncludeContextByDefault bool            `json:"include_context_by_default"`
@@ -38,6 +40,8 @@ func (b BotDefinition) normalize() (BotDefinition, error) {
 	b.DisplayName = strings.TrimSpace(b.DisplayName)
 	b.Description = strings.TrimSpace(b.Description)
 	b.FlowID = strings.TrimSpace(b.FlowID)
+	b.AuthMode = normalizeBotAuthMode(b.AuthMode)
+	b.AuthToken = strings.TrimSpace(b.AuthToken)
 	b.FileComponentID = strings.TrimSpace(b.FileComponentID)
 	b.ImageComponentID = strings.TrimSpace(b.ImageComponentID)
 
@@ -78,6 +82,19 @@ func (b BotDefinition) normalize() (BotDefinition, error) {
 	b.InputSchema = inputs
 
 	return b, nil
+}
+
+func normalizeBotAuthMode(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "inherit", "default":
+		return ""
+	case "x-api-key":
+		return "x-api-key"
+	case "bearer":
+		return "bearer"
+	default:
+		return ""
+	}
 }
 
 func normalizeStringSlice(items []string) []string {

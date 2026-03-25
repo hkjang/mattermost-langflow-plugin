@@ -90,7 +90,7 @@ func (p *Plugin) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	status.BotCount = len(runtimeCfg.BotDefinitions)
 	status.AllowHosts = runtimeCfg.AllowHosts
 	status.BaseURL = runtimeCfg.LangflowBaseURL
-	status.Bots = runtimeCfg.BotDefinitions
+	status.Bots = sanitizeBotDefinitions(runtimeCfg.BotDefinitions)
 	status.ManagedBots = status.BotSync.Entries
 	status.StreamingEnabled = runtimeCfg.EnableStreaming
 	status.StreamingUpdateIntervalMS = runtimeCfg.StreamingUpdateInterval.Milliseconds()
@@ -125,7 +125,7 @@ func (p *Plugin) handleBots(w http.ResponseWriter, r *http.Request) {
 
 	channelID := r.URL.Query().Get("channel_id")
 	if channelID == "" {
-		writeJSON(w, http.StatusOK, map[string]any{"bots": cfg.BotDefinitions})
+		writeJSON(w, http.StatusOK, map[string]any{"bots": sanitizeBotDefinitions(cfg.BotDefinitions)})
 		return
 	}
 
@@ -142,7 +142,7 @@ func (p *Plugin) handleBots(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"bots": cfg.getAllowedBots(user, channel, team),
+		"bots": sanitizeBotDefinitions(cfg.getAllowedBots(user, channel, team)),
 	})
 }
 
@@ -221,4 +221,14 @@ func writeJSON(w http.ResponseWriter, statusCode int, payload any) {
 
 func writeError(w http.ResponseWriter, statusCode int, err error) {
 	writeJSON(w, statusCode, map[string]string{"error": err.Error()})
+}
+
+func sanitizeBotDefinitions(items []BotDefinition) []BotDefinition {
+	sanitized := make([]BotDefinition, 0, len(items))
+	for _, item := range items {
+		next := item
+		next.AuthToken = ""
+		sanitized = append(sanitized, next)
+	}
+	return sanitized
 }

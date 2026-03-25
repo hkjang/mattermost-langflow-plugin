@@ -189,7 +189,7 @@ func (p *Plugin) prepareLangflowAttachments(
 			)
 		}
 
-		filePath, uploadErr := p.uploadLangflowFile(ctx, cfg, attachment, correlationID)
+		filePath, uploadErr := p.uploadLangflowFile(ctx, cfg, bot, attachment, correlationID)
 		if uploadErr != nil {
 			return nil, uploadErr
 		}
@@ -243,9 +243,9 @@ func mergeLangflowComponentSetting(tweaks map[string]any, componentID, key strin
 	return tweaks
 }
 
-func (p *Plugin) uploadLangflowFile(ctx context.Context, cfg *runtimeConfiguration, attachment botAttachment, correlationID string) (string, error) {
+func (p *Plugin) uploadLangflowFile(ctx context.Context, cfg *runtimeConfiguration, bot BotDefinition, attachment botAttachment, correlationID string) (string, error) {
 	endpointURL := buildURLWithPathSegments(cfg.ParsedBaseURL, append(langflowServicePathSegments(cfg.ParsedBaseURL), "api", "v2", "files")...)
-	return p.uploadLangflowMultipartFile(ctx, cfg, endpointURL, attachment, correlationID, func(body []byte) (string, error) {
+	return p.uploadLangflowMultipartFile(ctx, cfg, bot, endpointURL, attachment, correlationID, func(body []byte) (string, error) {
 		var response langflowV2FileUploadResponse
 		if err := json.Unmarshal(body, &response); err != nil {
 			return "", fmt.Errorf("failed to decode Langflow file upload response: %w", err)
@@ -260,7 +260,7 @@ func (p *Plugin) uploadLangflowFile(ctx context.Context, cfg *runtimeConfigurati
 
 func (p *Plugin) uploadLangflowImage(ctx context.Context, cfg *runtimeConfiguration, bot BotDefinition, attachment botAttachment, correlationID string) (string, error) {
 	endpointURL := buildURLWithPathSegments(cfg.ParsedBaseURL, append(langflowAPIPathSegments(cfg.ParsedBaseURL), "files", "upload", bot.FlowID)...)
-	return p.uploadLangflowMultipartFile(ctx, cfg, endpointURL, attachment, correlationID, func(body []byte) (string, error) {
+	return p.uploadLangflowMultipartFile(ctx, cfg, bot, endpointURL, attachment, correlationID, func(body []byte) (string, error) {
 		var response langflowV1ImageUploadResponse
 		if err := json.Unmarshal(body, &response); err != nil {
 			return "", fmt.Errorf("failed to decode Langflow image upload response: %w", err)
@@ -280,6 +280,7 @@ func (p *Plugin) uploadLangflowImage(ctx context.Context, cfg *runtimeConfigurat
 func (p *Plugin) uploadLangflowMultipartFile(
 	ctx context.Context,
 	cfg *runtimeConfiguration,
+	bot BotDefinition,
 	endpointURL *url.URL,
 	attachment botAttachment,
 	correlationID string,
@@ -306,7 +307,7 @@ func (p *Plugin) uploadLangflowMultipartFile(
 	request.Header.Set("Content-Type", writer.FormDataContentType())
 	request.Header.Set("Accept", "application/json")
 	request.Header.Set("X-Correlation-ID", correlationID)
-	p.applyAuthHeader(request, cfg)
+	p.applyAuthHeader(request, cfg, &bot)
 
 	client := &http.Client{Timeout: cfg.DefaultTimeout}
 	response, err := client.Do(request)
